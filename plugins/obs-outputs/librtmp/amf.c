@@ -1211,13 +1211,15 @@ AMF3_DecodeDepth(AMFObject *obj, const char *pBuffer, int nSize, int bAMFData,
             nRes = AMF3Prop_DecodeDepth(&prop, pBuffer, nSize, FALSE,
                                         depth);
             if (nRes == -1)
+            {
                 RTMP_Log(RTMP_LOGDEBUG, "%s, failed to decode AMF3 property!",
                          __FUNCTION__);
-            else
-            {
-                nSize -= nRes;
-                pBuffer += nRes;
+                /* prop was never set; fail the object instead of adding it */
+                AMF_Reset(obj);
+                return -1;
             }
+            nSize -= nRes;
+            pBuffer += nRes;
 
             AMFProp_SetName(&prop, &name);
             AMF_AddProp(obj, &prop);
@@ -1232,8 +1234,13 @@ AMF3_DecodeDepth(AMFObject *obj, const char *pBuffer, int nSize, int bAMFData,
                 nRes = AMF3Prop_DecodeDepth(&prop, pBuffer, nSize, FALSE,
                                             depth);
                 if (nRes == -1)
+                {
                     RTMP_Log(RTMP_LOGDEBUG, "%s, failed to decode AMF3 property!",
                              __FUNCTION__);
+                    /* adding -1 to pBuffer would step back into data already read */
+                    AMF_Reset(obj);
+                    return -1;
+                }
 
                 AMFProp_SetName(&prop, AMF3CD_GetProp(&cd, i));
                 AMF_AddProp(obj, &prop);
@@ -1251,6 +1258,13 @@ AMF3_DecodeDepth(AMFObject *obj, const char *pBuffer, int nSize, int bAMFData,
                         goto invalid;
                     nRes = AMF3Prop_DecodeDepth(&prop, pBuffer, nSize, TRUE,
                                                 depth);
+                    if (nRes == -1)
+                    {
+                        RTMP_Log(RTMP_LOGDEBUG, "%s, failed to decode AMF3 property!",
+                                 __FUNCTION__);
+                        AMF_Reset(obj);
+                        return -1;
+                    }
                     AMF_AddProp(obj, &prop);
 
                     pBuffer += nRes;
