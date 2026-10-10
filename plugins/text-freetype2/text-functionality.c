@@ -367,6 +367,65 @@ static void remove_cr(wchar_t *source)
 	source[j] = '\0';
 }
 
+static size_t utf16le_to_utf8(const uint8_t *in, size_t in_size, char *out)
+{
+	size_t len = 0;
+
+	for (size_t i = 0; i + 1 < in_size; i += 2) {
+		uint32_t code = (uint32_t)in[i] | ((uint32_t)in[i + 1] << 8);
+
+		if (code >= 0xD800 && code <= 0xDBFF) {
+			uint32_t low;
+			if (i + 3 >= in_size)
+				break;
+			low = (uint32_t)in[i + 2] | ((uint32_t)in[i + 3] << 8);
+			if (low < 0xDC00 || low > 0xDFFF)
+				break;
+			code = 0x10000 + ((code - 0xD800) << 10) + (low - 0xDC00);
+			i += 2;
+		} else if (code >= 0xDC00 && code <= 0xDFFF) {
+			break;
+		}
+
+		if (code < 0x80) {
+			out[len++] = (char)code;
+		} else if (code < 0x800) {
+			out[len++] = (char)(0xC0 | (code >> 6));
+			out[len++] = (char)(0x80 | (code & 0x3F));
+		} else if (code < 0x10000) {
+			out[len++] = (char)(0xE0 | (code >> 12));
+			out[len++] = (char)(0x80 | ((code >> 6) & 0x3F));
+			out[len++] = (char)(0x80 | (code & 0x3F));
+		} else {
+			out[len++] = (char)(0xF0 | (code >> 18));
+			out[len++] = (char)(0x80 | ((code >> 12) & 0x3F));
+			out[len++] = (char)(0x80 | ((code >> 6) & 0x3F));
+			out[len++] = (char)(0x80 | (code & 0x3F));
+		}
+	}
+
+	out[len] = '\0';
+	return len;
+}
+
+static void set_text_from_utf16(struct ft2_source *srcdata, const uint8_t *data, size_t size)
+{
+	char *utf8;
+	size_t utf8_size;
+
+	utf8 = bzalloc(size * 2 + 1);
+	utf8_size = utf16le_to_utf8(data, size, utf8);
+
+	if (srcdata->text != NULL) {
+		bfree(srcdata->text);
+		srcdata->text = NULL;
+	}
+	srcdata->text = bzalloc((utf8_size + 1) * sizeof(wchar_t));
+	os_utf8_to_wcs(utf8, utf8_size, srcdata->text, (utf8_size + 1));
+
+	bfree(utf8);
+}
+
 void load_text_from_file(struct ft2_source *srcdata, const char *filename)
 {
 	FILE *tmp_file = NULL;
@@ -389,15 +448,14 @@ void load_text_from_file(struct ft2_source *srcdata, const char *filename)
 	bytes_read = fread(&header, 1, 2, tmp_file);
 
 	if (bytes_read == 2 && header == 0xFEFF) {
-		// File is already in UTF-16 format
-		if (srcdata->text != NULL) {
-			bfree(srcdata->text);
-			srcdata->text = NULL;
-		}
-		srcdata->text = bzalloc(filesize);
-		bytes_read = fread(srcdata->text, filesize - 2, 1, tmp_file);
+		// File is UTF-16; decode through UTF-8 so srcdata->text is a
+		// properly terminated wchar_t string on every platform
+		uint8_t *utf16 = bmalloc(filesize);
+		size_t utf16_size = fread(utf16, 1, filesize - 2, tmp_file);
 
-		bfree(tmp_read);
+		set_text_from_utf16(srcdata, utf16, utf16_size);
+
+		bfree(utf16);
 		fclose(tmp_file);
 
 		return;
@@ -452,8 +510,10 @@ void read_from_end(struct ft2_source *srcdata, const char *filename)
 	while (line_breaks <= log_lines && cur_pos != 0) {
 		if (!utf16)
 			cur_pos--;
-		else
+		else if (cur_pos >= 2)
 			cur_pos -= 2;
+		else
+			cur_pos = 0;
 		fseek(tmp_file, cur_pos, SEEK_SET);
 
 		if (!utf16) {
@@ -469,19 +529,19 @@ void read_from_end(struct ft2_source *srcdata, const char *filename)
 
 	if (cur_pos != 0)
 		cur_pos += (utf16) ? 2 : 1;
+	else if (utf16)
+		cur_pos = 2;
 
 	fseek(tmp_file, cur_pos, SEEK_SET);
 
 	if (utf16) {
-		if (srcdata->text != NULL) {
-			bfree(srcdata->text);
-			srcdata->text = NULL;
-		}
-		srcdata->text = bzalloc(filesize - cur_pos);
-		bytes_read = fread(srcdata->text, (filesize - cur_pos), 1, tmp_file);
+		uint8_t *utf16_data = bmalloc(filesize - cur_pos + 1);
+		size_t utf16_size = fread(utf16_data, 1, filesize - cur_pos, tmp_file);
+
+		set_text_from_utf16(srcdata, utf16_data, utf16_size);
 
 		remove_cr(srcdata->text);
-		bfree(tmp_read);
+		bfree(utf16_data);
 		fclose(tmp_file);
 
 		return;
