@@ -86,6 +86,28 @@ static struct buf nested_amf3_objects(size_t depth)
 	return b;
 }
 
+/* Same nesting, but a complete, decodable document: nested levels emit
+ * the object marker twice (member type and object header — the top-level
+ * marker is read once, after AVMPLUS), the innermost "a" is an integer,
+ * and every member list ends with an empty name. Each object closes with
+ * an integer member "b": the decoder adds the empty-name terminator as a
+ * property too, and it must not duplicate an object pointer for
+ * AMF_Reset to stay sound. */
+static struct buf nested_amf3_objects_full(size_t depth)
+{
+	struct buf b = {0};
+	PUT(&b, AMF_AVMPLUS);
+	/* object, inline dynamic traits, empty class name, "a" */
+	PUT(&b, AMF3_OBJECT, 0x0b, 0x01, 0x03, 'a');
+	for (size_t i = 1; i < depth; i++)
+		PUT(&b, AMF3_OBJECT, AMF3_OBJECT, 0x0b, 0x01, 0x03, 'a');
+	PUT(&b, AMF3_INTEGER, 0x00);
+	for (size_t i = 0; i < depth; i++)
+		/* "b" = 0, then the empty-name terminator */
+		PUT(&b, 0x03, 'b', AMF3_INTEGER, 0x00, 0x01);
+	return b;
+}
+
 static int decode(struct buf *b)
 {
 	AMFObject obj;
@@ -145,6 +167,12 @@ static void test_depth_limit(void **state)
 	len = b.len;
 	assert_int_equal(decode(&b), (int)len);
 	b = nested_ecma_arrays(MAX_DEPTH + 1);
+	assert_int_equal(decode(&b), -1);
+
+	b = nested_amf3_objects_full(MAX_DEPTH);
+	len = b.len;
+	assert_int_equal(decode(&b), (int)len);
+	b = nested_amf3_objects_full(MAX_DEPTH + 1);
 	assert_int_equal(decode(&b), -1);
 
 	b = nested_amf3_objects(MAX_DEPTH + 1);
