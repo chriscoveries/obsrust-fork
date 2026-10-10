@@ -3610,6 +3610,12 @@ HandleChangeChunkSize(RTMP *r, const RTMPPacket *packet)
                      chunkSize);
             return;
         }
+        if (chunkSize > RTMP_MAX_IN_CHUNK_SIZE)
+        {
+            RTMP_Log(RTMP_LOGWARNING, "%s, clamping chunk size %d to %d", __FUNCTION__,
+                     chunkSize, RTMP_MAX_IN_CHUNK_SIZE);
+            chunkSize = RTMP_MAX_IN_CHUNK_SIZE;
+        }
         r->m_inChunkSize = chunkSize;
         RTMP_Log(RTMP_LOGDEBUG, "%s, received: chunk size change to %d", __FUNCTION__,
                  r->m_inChunkSize);
