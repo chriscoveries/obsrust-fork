@@ -25,6 +25,9 @@ enum clut_dimension {
 	CLUT_3D,
 };
 
+#define MAX_1D_LUT_SIZE 65536
+#define MAX_3D_LUT_SIZE 256
+
 struct lut_filter_data {
 	obs_source_t *context;
 	gs_effect_t *effect;
@@ -112,7 +115,10 @@ static bool get_cube_entry(FILE *const file, float *const red, float *const gree
 
 static void *load_1d_lut(FILE *const file, const uint32_t width, float red, float green, float blue)
 {
-	const uint32_t data_size = 4 * width * width * width * sizeof(struct half);
+	if (width == 0 || width > MAX_1D_LUT_SIZE)
+		return NULL;
+
+	const size_t data_size = (size_t)width * 4 * sizeof(struct half);
 	struct half *values = bmalloc(data_size);
 
 	size_t offset = 0;
@@ -137,7 +143,10 @@ static void *load_1d_lut(FILE *const file, const uint32_t width, float red, floa
 
 static void *load_3d_lut(FILE *const file, const uint32_t width, float red, float green, float blue)
 {
-	const uint32_t data_size = 4 * width * width * width * sizeof(struct half);
+	if (width == 0 || width > MAX_3D_LUT_SIZE)
+		return NULL;
+
+	const size_t data_size = (size_t)width * width * width * 4 * sizeof(struct half);
 	struct half *values = bmalloc(data_size);
 
 	size_t offset = 0;
