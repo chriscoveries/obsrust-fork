@@ -168,12 +168,36 @@ static void test_deep_nesting(void **state)
 	assert_int_equal(decode(&b), -1);
 }
 
+/* An AMF3 member that fails to decode (here an unsupported array) fails the
+ * whole object. librtmp used to keep the half-decoded property and step the
+ * buffer back by the -1 it got (obs-rust/obs-studio#116). */
+static void test_amf3_member_error(void **state)
+{
+	(void)state;
+	/* object, inline traits, 1 sealed member, empty class name, "a",
+	 * then an AMF3 array value */
+	const char sealed[] = {AMF3_OBJECT, 0x13, 0x01, 0x03, 'a', AMF3_ARRAY, 0x01};
+	/* object, inline externalizable traits, empty class name, then an
+	 * AMF3 array value */
+	const char externalizable[] = {AMF3_OBJECT, 0x07, 0x01, AMF3_ARRAY, 0x01};
+	AMFObject obj;
+
+	memset(&obj, 0, sizeof(obj));
+	assert_int_equal(AMF3_Decode(&obj, sealed, (int)sizeof(sealed), TRUE), -1);
+	assert_int_equal(AMF_CountProp(&obj), 0);
+
+	memset(&obj, 0, sizeof(obj));
+	assert_int_equal(AMF3_Decode(&obj, externalizable, (int)sizeof(externalizable), TRUE), -1);
+	assert_int_equal(AMF_CountProp(&obj), 0);
+}
+
 int main(void)
 {
 	const struct CMUnitTest tests[] = {
 		cmocka_unit_test(test_nested_object),
 		cmocka_unit_test(test_depth_limit),
 		cmocka_unit_test(test_deep_nesting),
+		cmocka_unit_test(test_amf3_member_error),
 	};
 
 	return cmocka_run_group_tests(tests, NULL, NULL);
