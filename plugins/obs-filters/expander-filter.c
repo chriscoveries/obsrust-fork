@@ -8,6 +8,8 @@
 #include <util/deque.h>
 #include <util/threading.h>
 
+#include "dynamics-simd.h"
+
 /* -------------------------------------------------------- */
 
 #define do_log(level, format, ...) \
@@ -319,59 +321,9 @@ static void analyze_envelope(struct expander_data *cd, float **samples, const ui
 	}
 }
 
-static inline void process_sample(size_t idx, float *samples, float *env_buf, float *gain_db, bool is_upwcomp,
-				  float channel_gain, float threshold, float slope, float attack_gain,
-				  float inv_attack_gain, float release_gain, float inv_release_gain, float output_gain,
-				  float knee)
-{
-	/* --------------------------------- */
-	/* gain stage of expansion           */
-
-	float env_db = mul_to_db(env_buf[idx]);
-	float diff = threshold - env_db;
-
-	if (is_upwcomp && env_db <= (threshold - 60.0f) / 2)
-		diff = env_db + 60.0f > 0 ? env_db + 60.0f : 0.0f;
-
-	float gain = 0.0f;
-	float prev_gain = 0.0f;
-	// Note that the gain is always >= 0 for the upward compressor
-	// but is always <=0 for the expander.
-	if (is_upwcomp) {
-		prev_gain = idx > 0 ? fmaxf(gain_db[idx - 1], 0) : fmaxf(channel_gain, 0);
-		// gain above knee (included for clarity):
-		if (env_db >= threshold + knee / 2)
-			gain = 0.0f;
-		// gain below knee:
-		if (threshold - knee / 2 >= env_db)
-			gain = slope * diff;
-		// gain in knee:
-		if (env_db > threshold - knee / 2 && threshold + knee / 2 > env_db)
-			gain = slope * powf(diff + knee / 2, 2) / (2.0f * knee);
-	} else {
-		prev_gain = idx > 0 ? gain_db[idx - 1] : channel_gain;
-		gain = diff > 0.0f ? fmaxf(slope * diff, -60.0f) : 0.0f;
-	}
-
-	/* --------------------------------- */
-	/* ballistics (attack/release)       */
-
-	if (gain > prev_gain)
-		gain_db[idx] = attack_gain * prev_gain + inv_attack_gain * gain;
-	else
-		gain_db[idx] = release_gain * prev_gain + inv_release_gain * gain;
-
-	/* --------------------------------- */
-	/* output                            */
-
-	if (!is_upwcomp) {
-		gain = db_to_mul(fminf(0, gain_db[idx]));
-	} else {
-		gain = db_to_mul(gain_db[idx]);
-	}
-
-	samples[idx] *= gain * output_gain;
-}
+/* per-sample math lives in dyn_expander_process (dynamics-simd.h): the
+ * dB-domain gain stage and the output multiply vectorize, while the
+ * attack/release ballistics stay serial. */
 
 // gain stage and ballistics in dB domain
 static inline void process_expansion(struct expander_data *cd, float **samples, uint32_t num_samples)
@@ -392,17 +344,21 @@ static inline void process_expansion(struct expander_data *cd, float **samples, 
 	for (size_t i = 0; i < cd->num_channels; i++)
 		memset(cd->gain_db[i], 0, num_samples * sizeof(cd->gain_db[i][0]));
 
+	const struct dyn_expander_cfg ecfg = {
+		.is_upwcomp = is_upwcomp,
+		.threshold = threshold,
+		.slope = slope,
+		.knee = knee,
+		.attack_gain = attack_gain,
+		.inv_attack_gain = inv_attack_gain,
+		.release_gain = release_gain,
+		.inv_release_gain = inv_release_gain,
+		.output_gain = output_gain,
+	};
 	for (size_t chan = 0; chan < cd->num_channels; chan++) {
-		float *channel_samples = samples[chan];
-		float *env_buf = cd->envelope_buf[chan];
-		float *gain_db = cd->gain_db[chan];
-		float channel_gain = cd->gain_db_buf[chan];
-
-		for (size_t i = 0; i < num_samples; ++i) {
-			process_sample(i, channel_samples, env_buf, gain_db, is_upwcomp, channel_gain, threshold, slope,
-				       attack_gain, inv_attack_gain, release_gain, inv_release_gain, output_gain, knee);
-		}
-		cd->gain_db_buf[chan] = gain_db[num_samples - 1];
+		dyn_expander_process(cd->envelope_buf[chan], cd->gain_db[chan], samples[chan], num_samples,
+				     cd->gain_db_buf[chan], &ecfg);
+		cd->gain_db_buf[chan] = cd->gain_db[chan][num_samples - 1];
 	}
 }
 

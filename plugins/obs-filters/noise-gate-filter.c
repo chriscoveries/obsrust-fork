@@ -2,6 +2,8 @@
 #include <obs-module.h>
 #include <math.h>
 
+#include "dynamics-simd.h"
+
 #define do_log(level, format, ...) \
 	blog(level, "[noise gate: '%s'] " format, obs_source_get_name(ng->context), ##__VA_ARGS__)
 
@@ -42,6 +44,10 @@ struct noise_gate_data {
 	float attenuation;
 	float level;
 	float held_time;
+
+	float *level_buf;
+	float *atten_buf;
+	size_t scratch_len;
 };
 
 #define VOL_MIN -96.0
@@ -56,6 +62,8 @@ static const char *noise_gate_name(void *unused)
 static void noise_gate_destroy(void *data)
 {
 	struct noise_gate_data *ng = data;
+	bfree(ng->level_buf);
+	bfree(ng->atten_buf);
 	bfree(ng);
 }
 
@@ -121,11 +129,20 @@ static struct obs_audio_data *noise_gate_filter_audio(void *data, struct obs_aud
 	const float hold_time = ng->hold_time;
 	const size_t channels = ng->channels;
 
+	if (ng->scratch_len < audio->frames) {
+		ng->scratch_len = audio->frames;
+		ng->level_buf = brealloc(ng->level_buf, ng->scratch_len * sizeof(float));
+		ng->atten_buf = brealloc(ng->atten_buf, ng->scratch_len * sizeof(float));
+	}
+
+	/* pass 1: per-i level = max over channels of |x| (vector pass) */
+	float *level_buf = ng->level_buf;
+	float *atten_buf = ng->atten_buf;
+	dyn_channel_max_abs(level_buf, adata, channels, audio->frames);
+
+	/* pass 2: serial gate state machine -> per-i attenuation curve */
 	for (size_t i = 0; i < audio->frames; i++) {
-		float cur_level = fabsf(adata[0][i]);
-		for (size_t j = 0; j < channels; j++) {
-			cur_level = fmaxf(cur_level, fabsf(adata[j][i]));
-		}
+		const float cur_level = level_buf[i];
 
 		if (cur_level > open_threshold && !ng->is_open) {
 			ng->is_open = true;
@@ -146,9 +163,11 @@ static struct obs_audio_data *noise_gate_filter_audio(void *data, struct obs_aud
 			}
 		}
 
-		for (size_t c = 0; c < channels; c++)
-			adata[c][i] *= ng->attenuation;
+		atten_buf[i] = ng->attenuation;
 	}
+
+	/* pass 3: per-channel gain application (vector pass) */
+	dyn_apply_gain(adata, channels, audio->frames, atten_buf);
 
 	return audio;
 }

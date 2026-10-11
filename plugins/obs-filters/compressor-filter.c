@@ -4,6 +4,8 @@
 
 #include <obs-module.h>
 #include <media-io/audio-math.h>
+
+#include "dynamics-simd.h"
 #include <util/platform.h>
 #include <util/deque.h>
 #include <util/threading.h>
@@ -300,23 +302,8 @@ static void analyze_envelope(struct compressor_data *cd, float **samples, const 
 	const float attack_gain = cd->attack_gain;
 	const float release_gain = cd->release_gain;
 
-	memset(cd->envelope_buf, 0, num_samples * sizeof(cd->envelope_buf[0]));
-	for (size_t chan = 0; chan < cd->num_channels; ++chan) {
-		if (!samples[chan])
-			continue;
-
-		float *envelope_buf = cd->envelope_buf;
-		float env = cd->envelope;
-		for (uint32_t i = 0; i < num_samples; ++i) {
-			const float env_in = fabsf(samples[chan][i]);
-			if (env < env_in) {
-				env = env_in + attack_gain * (env - env_in);
-			} else {
-				env = env_in + release_gain * (env - env_in);
-			}
-			envelope_buf[i] = fmaxf(envelope_buf[i], env);
-		}
-	}
+	dyn_envelope_analyze(cd->envelope_buf, samples, cd->num_channels, num_samples, cd->attack_gain,
+			     cd->release_gain, cd->envelope);
 	cd->envelope = cd->envelope_buf[num_samples - 1];
 }
 
@@ -332,29 +319,17 @@ static void analyze_sidechain(struct compressor_data *cd, const uint32_t num_sam
 	const float release_gain = cd->release_gain;
 	float **sidechain_buf = cd->sidechain_buf;
 
-	memset(cd->envelope_buf, 0, num_samples * sizeof(cd->envelope_buf[0]));
-	for (size_t chan = 0; chan < cd->num_channels; ++chan) {
-		if (!sidechain_buf[chan])
-			continue;
-
-		float *envelope_buf = cd->envelope_buf;
-		float env = cd->envelope;
-		for (uint32_t i = 0; i < num_samples; ++i) {
-			const float env_in = fabsf(sidechain_buf[chan][i]);
-
-			if (env < env_in) {
-				env = env_in + attack_gain * (env - env_in);
-			} else {
-				env = env_in + release_gain * (env - env_in);
-			}
-			envelope_buf[i] = fmaxf(envelope_buf[i], env);
-		}
-	}
+	dyn_envelope_analyze(cd->envelope_buf, sidechain_buf, cd->num_channels, num_samples, cd->attack_gain,
+			     cd->release_gain, cd->envelope);
 	cd->envelope = cd->envelope_buf[num_samples - 1];
 }
 
 static inline void process_compression(const struct compressor_data *cd, float **samples, uint32_t num_samples)
 {
+#if DYN_SIMD_SSE2
+	dyn_compression_gain_apply(cd->envelope_buf, samples, cd->num_channels, num_samples, cd->slope, cd->threshold,
+				   cd->output_gain);
+#else
 	for (size_t i = 0; i < num_samples; ++i) {
 		const float env_db = mul_to_db(cd->envelope_buf[i]);
 		float gain = cd->slope * (cd->threshold - env_db);
@@ -366,6 +341,7 @@ static inline void process_compression(const struct compressor_data *cd, float *
 			}
 		}
 	}
+#endif
 }
 
 static void compressor_tick(void *data, float seconds)
