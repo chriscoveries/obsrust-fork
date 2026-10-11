@@ -156,11 +156,12 @@ fn decompress_nv12_matches_oracle() {
 #[test]
 fn decompress_422_matches_oracle() {
     let mut r = seed(0xabcd_abcd_abcd_abcd);
-    let input: Vec<u8> = (0..W * H * 2).map(|_| r()).collect();
     let in_ls = W * 2;
     let out_ls = W * 4;
-    // The kernel writes in_linesize u32s per row (2 per input word) while
-    // striding by out_linesize — capacity must cover the overlap.
+    // The kernel reads min(in,out)/2 u32s per row — 2*in_linesize bytes when
+    // in_linesize < out_linesize — so the last row reads a full line past
+    // the nominal input end; the same overlap applies on the output side.
+    let input: Vec<u8> = (0..(H + 1) * in_ls).map(|_| r()).collect();
     let out_cap = ((H - 1) * out_ls + in_ls * 4) as usize;
 
     for leading in [true, false] {
