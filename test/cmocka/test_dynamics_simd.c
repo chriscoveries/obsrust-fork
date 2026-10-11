@@ -84,6 +84,37 @@ static void envelope_tail_matches(void **state)
 		free(in[c]);
 }
 
+static void negative_exponent_matches_scalar(void **state)
+{
+#if DYN_SIMD_SSE2
+	UNUSED_PARAMETER(state);
+
+	/* Include lanes with and without a negative floor correction. */
+	const float exponents[4] = {-0.125f, -0.25f, -0.5f, -1.0f};
+	float actual[4];
+	_mm_storeu_ps(actual, dyn_pow10f_ps(_mm_loadu_ps(exponents)));
+	for (size_t i = 0; i < 4; ++i) {
+		const float expected = powf(10.0f, exponents[i]);
+		assert_true(isfinite(actual[i]));
+		assert_true(fabsf(actual[i] - expected) / expected < 1e-5f);
+	}
+
+	/* Unit envelopes isolate pow10 from the log approximation. The first
+	 * four samples use SIMD; the fifth uses the scalar gain tail. */
+	float env[5] = {1.0f, 1.0f, 1.0f, 1.0f, 1.0f};
+	float samples[5] = {1.0f, 1.0f, 1.0f, 1.0f, 1.0f};
+	float *channels[1] = {samples};
+	dyn_compression_gain_apply(env, channels, 1, 5, 1.0f, -20.0f, 1.0f);
+	for (size_t i = 0; i < 5; ++i) {
+		assert_true(isfinite(samples[i]));
+		assert_float_equal(samples[i], 0.1f, 1e-6f);
+	}
+#else
+	(void)state;
+	skip();
+#endif
+}
+
 static void gain_matches_scalar(void **state)
 {
 #if DYN_SIMD_SSE2
@@ -262,6 +293,8 @@ static void expander_matches_scalar(void **state)
 int main(void)
 {
 	const struct CMUnitTest tests[] = {
+		cmocka_unit_test(negative_exponent_matches_scalar),
+
 		cmocka_unit_test(envelope_matches_scalar),      cmocka_unit_test(envelope_tail_matches),
 		cmocka_unit_test(gain_matches_scalar),          cmocka_unit_test(gain_silence_is_unity),
 		cmocka_unit_test(max_abs_and_apply_gain_match), cmocka_unit_test(expander_matches_scalar),
