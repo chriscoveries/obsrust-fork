@@ -61,6 +61,7 @@ fn main() {
         .file("oracle/platform_conv_host.c")
         .file("oracle/video_fourcc.c")
         .file("oracle/video_io_inlines.c")
+        .file("oracle/format_conversion.c")
         .file("oracle/frame_rate.c")
         .file("oracle/task.c")
         .file("oracle/profiler_snapshot.c")

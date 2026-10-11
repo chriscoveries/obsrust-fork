@@ -261,6 +261,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "obs-convert"
+version = "0.1.0"
+dependencies = [
+ "obs-c-oracle",
+ "proptest",
+]
+
+[[package]]
 name = "obs-graphics"
 version = "0.1.0"
 dependencies = [

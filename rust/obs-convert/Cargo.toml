@@ -1,0 +1,11 @@
+[package]
+name = "obs-convert"
+version = "0.1.0"
+description = "Runtime-dispatched YUV<->RGB / planar<->packed conversion kernels (perf P3)"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dev-dependencies]
+obs-c-oracle = { path = "../obs-c-oracle" }
+proptest = "1"

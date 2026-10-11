@@ -12,6 +12,7 @@
 
 pub mod bmem;
 pub mod dstr;
+pub mod format_conversion;
 pub mod frame_rate;
 pub mod lexer;
 pub mod text_lookup;
