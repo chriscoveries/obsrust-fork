@@ -182,9 +182,9 @@ static void max_abs_and_apply_gain_match(void **state)
 }
 
 /* reference: the scalar expander loop this replaces */
-static void expander_scalar(float *env_buf, float *gain_db, float *samples, uint32_t n, float channel_gain,
-			    bool upw, float threshold, float slope, float attack_gain, float inv_attack_gain,
-			    float release_gain, float inv_release_gain, float output_gain, float knee)
+static void expander_scalar(float *env_buf, float *gain_db, float *samples, uint32_t n, float channel_gain, bool upw,
+			    float threshold, float slope, float attack_gain, float inv_attack_gain, float release_gain,
+			    float inv_release_gain, float output_gain, float knee)
 {
 	for (uint32_t i = 0; i < n; ++i) {
 		const float env_db = mul_to_db(env_buf[i]);
@@ -242,8 +242,7 @@ static void expander_matches_scalar(void **state)
 		};
 		float envref[512];
 		memcpy(envref, env, sizeof env);
-		expander_scalar(envref, gdref, sref, 512, 0.0f, upw, -20.0f, 3.0f, 0.7f, 0.3f, 0.9f, 0.1f, 1.0f,
-				knee);
+		expander_scalar(envref, gdref, sref, 512, 0.0f, upw, -20.0f, 3.0f, 0.7f, 0.3f, 0.9f, 0.1f, 1.0f, knee);
 		dyn_expander_process(env, gd, s, 512, 0.0f, &c);
 
 		/* vector log/exp approximations accumulate a little through the
@@ -263,12 +262,9 @@ static void expander_matches_scalar(void **state)
 int main(void)
 {
 	const struct CMUnitTest tests[] = {
-		cmocka_unit_test(envelope_matches_scalar),
-		cmocka_unit_test(envelope_tail_matches),
-		cmocka_unit_test(gain_matches_scalar),
-		cmocka_unit_test(gain_silence_is_unity),
-		cmocka_unit_test(max_abs_and_apply_gain_match),
-		cmocka_unit_test(expander_matches_scalar),
+		cmocka_unit_test(envelope_matches_scalar),      cmocka_unit_test(envelope_tail_matches),
+		cmocka_unit_test(gain_matches_scalar),          cmocka_unit_test(gain_silence_is_unity),
+		cmocka_unit_test(max_abs_and_apply_gain_match), cmocka_unit_test(expander_matches_scalar),
 	};
 	return cmocka_run_group_tests(tests, NULL, NULL);
 }

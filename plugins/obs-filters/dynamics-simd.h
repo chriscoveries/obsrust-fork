@@ -46,9 +46,8 @@
 /* -------------------------------------------------------- */
 /* envelope: per-i fmax across channels of a one-pole filter   */
 
-static inline void dyn_envelope_analyze_scalar(float *env_buf, float **bufs, size_t num_channels,
-					       uint32_t num_samples, float attack_gain, float release_gain,
-					       float env_state)
+static inline void dyn_envelope_analyze_scalar(float *env_buf, float **bufs, size_t num_channels, uint32_t num_samples,
+					       float attack_gain, float release_gain, float env_state)
 {
 	memset(env_buf, 0, num_samples * sizeof(env_buf[0]));
 	for (size_t chan = 0; chan < num_channels; ++chan) {
@@ -76,8 +75,7 @@ static inline float dyn_hmax4(__m128 v)
 }
 
 static inline void dyn_envelope_group(float *env_buf, float **bufs, size_t chan_base, size_t chan_count,
-				      uint32_t num_samples, __m128 attack, __m128 release, __m128 envv,
-				      __m128 neg_inf)
+				      uint32_t num_samples, __m128 attack, __m128 release, __m128 envv, __m128 neg_inf)
 {
 	__m128 valid;
 	{
@@ -95,9 +93,7 @@ static inline void dyn_envelope_group(float *env_buf, float **bufs, size_t chan_
 		 * i-vectors whose lanes are channels. */
 		__m128 r[4];
 		for (size_t c = 0; c < 4; ++c) {
-			const float *p = (c < chan_count && bufs[chan_base + c])
-							 ? bufs[chan_base + c] + i
-							 : NULL;
+			const float *p = (c < chan_count && bufs[chan_base + c]) ? bufs[chan_base + c] + i : NULL;
 			__m128 row = p ? _mm_loadu_ps(p) : zero;
 			r[c] = _mm_andnot_ps(_mm_set1_ps(-0.0f), row);
 		}
@@ -126,14 +122,13 @@ static inline void dyn_envelope_group(float *env_buf, float **bufs, size_t chan_
 	}
 }
 
-static inline void dyn_envelope_analyze(float *env_buf, float **bufs, size_t num_channels,
-					uint32_t num_samples, float attack_gain, float release_gain,
-					float env_state)
+static inline void dyn_envelope_analyze(float *env_buf, float **bufs, size_t num_channels, uint32_t num_samples,
+					float attack_gain, float release_gain, float env_state)
 {
 	/* one live channel: the lane-packing overhead outweighs the win */
 	if (num_channels < 2 || (num_channels == 2 && !bufs[1])) {
-		dyn_envelope_analyze_scalar(env_buf, bufs, num_channels, num_samples, attack_gain,
-					    release_gain, env_state);
+		dyn_envelope_analyze_scalar(env_buf, bufs, num_channels, num_samples, attack_gain, release_gain,
+					    env_state);
 		return;
 	}
 	memset(env_buf, 0, num_samples * sizeof(env_buf[0]));
@@ -146,19 +141,17 @@ static inline void dyn_envelope_analyze(float *env_buf, float **bufs, size_t num
 	 * cover MAX_AUDIO_CHANNELS == 8. */
 	for (size_t base = 0; base < num_channels; base += 4) {
 		const size_t cnt = num_channels - base;
-		dyn_envelope_group(env_buf, bufs, base, cnt < 4 ? cnt : 4, num_samples, attack, release,
-				 envv0, neg_inf);
+		dyn_envelope_group(env_buf, bufs, base, cnt < 4 ? cnt : 4, num_samples, attack, release, envv0,
+				   neg_inf);
 	}
 }
 
 #else /* !DYN_SIMD_SSE2 */
 
-static inline void dyn_envelope_analyze(float *env_buf, float **bufs, size_t num_channels,
-					uint32_t num_samples, float attack_gain, float release_gain,
-					float env_state)
+static inline void dyn_envelope_analyze(float *env_buf, float **bufs, size_t num_channels, uint32_t num_samples,
+					float attack_gain, float release_gain, float env_state)
 {
-	dyn_envelope_analyze_scalar(env_buf, bufs, num_channels, num_samples, attack_gain, release_gain,
-				    env_state);
+	dyn_envelope_analyze_scalar(env_buf, bufs, num_channels, num_samples, attack_gain, release_gain, env_state);
 }
 
 #endif /* DYN_SIMD_SSE2 */
@@ -243,8 +236,7 @@ static inline __m128 dyn_pow10f_ps(__m128 x)
  * Vector part computes gains 4 at a time; channel multiply vectorizes per
  * channel. Non-positive envelope maps to -inf dB like mul_to_db. */
 static inline void dyn_compression_gain_apply(float *env_buf, float **samples, size_t num_channels,
-					      uint32_t num_samples, float slope, float threshold,
-					      float output_gain)
+					      uint32_t num_samples, float slope, float threshold, float output_gain)
 {
 	const __m128 m20log10e = _mm_set1_ps(8.685889638065037f); /* 20*log10(e) */
 	const __m128 slope_v = _mm_set1_ps(slope);
@@ -313,8 +305,7 @@ static inline void dyn_channel_max_abs(float *out, float **bufs, size_t num_chan
 #endif
 }
 
-static inline void dyn_apply_gain(float **bufs, size_t num_channels, uint32_t num_samples,
-				  const float *gain)
+static inline void dyn_apply_gain(float **bufs, size_t num_channels, uint32_t num_samples, const float *gain)
 {
 #if DYN_SIMD_SSE2
 	for (size_t c = 0; c < num_channels; ++c) {
@@ -355,9 +346,8 @@ struct dyn_expander_cfg {
 	float output_gain;
 };
 
-static inline void dyn_expander_process(float *env_buf, float *gain_db, float *samples,
-					uint32_t num_samples, float channel_gain,
-					const struct dyn_expander_cfg *cfg)
+static inline void dyn_expander_process(float *env_buf, float *gain_db, float *samples, uint32_t num_samples,
+					float channel_gain, const struct dyn_expander_cfg *cfg)
 {
 #if DYN_SIMD_SSE2
 	const __m128 m20log10e = _mm_set1_ps(8.685889638065037f);
