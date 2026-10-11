@@ -206,7 +206,7 @@ static inline __m128 dyn_pow10f_ps(__m128 x)
 	__m128 k = _mm_cvtepi32_ps(ki);
 	__m128 over = _mm_cmpgt_ps(k, fx);
 	k = _mm_sub_ps(k, _mm_and_ps(over, _mm_set1_ps(1.0f)));
-	ki = _mm_sub_epi32(ki, _mm_srai_epi32(_mm_castps_si128(over), 31));
+	ki = _mm_sub_epi32(ki, _mm_srli_epi32(_mm_castps_si128(over), 31));
 
 	x = _mm_sub_ps(x, _mm_mul_ps(k, _mm_set1_ps(0.693359375f)));
 	x = _mm_sub_ps(x, _mm_mul_ps(k, _mm_set1_ps(-2.12194440e-4f)));
