@@ -1,17 +1,4 @@
-#include <windows.h>
-
-#include <obs-module.h>
-#include <util/dstr.h>
-#include <util/threading.h>
-
-#include "cursor-capture.h"
-#ifdef OBS_LEGACY
-#include "../../libobs/util/platform.h"
-#include "../../libobs-winrt/winrt-capture.h"
-#else
-#include <util/platform.h>
-#include <winrt-capture.h>
-#endif
+#include "build/win-capture.pch.h"
 
 #define do_log(level, format, ...) \
 	blog(level, "[duplicator-monitor-capture: '%s'] " format, obs_source_get_name(capture->source), ##__VA_ARGS__)
@@ -872,3 +859,18 @@ struct obs_source_info duplicator_capture_info = {
 #undef TEXT_METHOD_WGC
 #undef do_log
 #undef warn
+
+/* File-local macros (BUILD.md): out of the next file in the unity group. */
+#undef info
+#undef debug
+#undef TEXT_MONITOR_CAPTURE
+#undef TEXT_CAPTURE_CURSOR
+#undef TEXT_COMPATIBILITY
+#undef TEXT_MONITOR
+#undef TEXT_PRIMARY_MONITOR
+#undef TEXT_METHOD_AUTO
+#undef TEXT_METHOD_DXGI
+#undef TEXT_FORCE_SDR
+#undef RESET_INTERVAL_SEC
+#undef INVALID_DISPLAY
+#undef WINRT_IMPORT

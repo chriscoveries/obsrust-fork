@@ -1,12 +1,4 @@
-#include <obs-module.h>
-#include <util/windows/win-version.h>
-#include <util/platform.h>
-#include <util/dstr.h>
-#include <util/config-file.h>
-#include <util/pipe.h>
-
-#include <windows.h>
-#include "graphics-hook-info.h"
+#include "build/win-capture.pch.h"
 
 extern struct graphics_offsets offsets32;
 extern struct graphics_offsets offsets64;

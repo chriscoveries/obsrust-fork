@@ -1,13 +1,4 @@
-#include <windows.h>
-#include <strsafe.h>
-#include <shlobj.h>
-#include <aclapi.h>
-#include <sddl.h>
-#include <obs-module.h>
-#include <util/windows/win-version.h>
-#include <util/platform.h>
-#include <util/c99defs.h>
-#include <util/base.h>
+#include "build/win-capture.pch.h"
 
 /* ------------------------------------------------------------------------- */
 /* helper funcs                                                              */
@@ -349,3 +340,8 @@ void init_hook_files()
 
 /* File-local macros: keep them out of the next source of a unity build. */
 #undef warn
+
+/* File-local macros (BUILD.md): out of the next file in the unity group. */
+#undef get_programdata_path
+#undef make_filename
+#undef IMPLICIT_LAYERS

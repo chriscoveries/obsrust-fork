@@ -411,4 +411,8 @@ void obs_module_unload(void)
 #if defined(_WIN32) && !defined(_M_ARM64)
 	amf_unload();
 #endif
+
+#ifdef LIBAVUTIL_VAAPI_AVAILABLE
+	vaapi_free_device_caps();
+#endif
 }

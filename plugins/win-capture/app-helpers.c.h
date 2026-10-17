@@ -1,10 +1,4 @@
-#include <windows.h>
-#include <stdio.h>
-#include "app-helpers.h"
-#include "nt-stuff.h"
-#include "util/base.h"
-
-WINADVAPI BOOL WINAPI ConvertSidToStringSidW(PSID sid, LPWSTR *str);
+#include "build/win-capture.pch.h"
 
 bool is_app(HANDLE process)
 {

@@ -1,24 +1,4 @@
-#include <objbase.h>
-
-#include <obs-module.h>
-#include <obs.hpp>
-#include <util/dstr.hpp>
-#include <util/platform.h>
-#include <util/windows/WinHandle.hpp>
-#include <util/threading.h>
-#ifdef OBS_LEGACY
-#include "libdshowcapture/dshowcapture.hpp"
-#else
-#include <dshowcapture.hpp>
-#endif
-#include "ffmpeg-decode.h"
-#include "encode-dstr.hpp"
-
-#include <algorithm>
-#include <limits>
-#include <set>
-#include <string>
-#include <vector>
+#include "build/win-dshow.pch.hpp"
 
 /*
  * TODO:
@@ -2092,3 +2072,69 @@ void RegisterDShowSource()
 	info.icon_type = OBS_ICON_TYPE_CAMERA;
 	obs_register_source(&info);
 }
+
+/* File-local macros (BUILD.md): out of the next file in the unity group. */
+#undef VIDEO_DEVICE_ID
+#undef RES_TYPE
+#undef RESOLUTION
+#undef FRAME_INTERVAL
+#undef VIDEO_FORMAT
+#undef LAST_VIDEO_DEV_ID
+#undef LAST_RESOLUTION
+#undef BUFFERING_VAL
+#undef FLIP_IMAGE
+#undef AUDIO_OUTPUT_MODE
+#undef USE_CUSTOM_AUDIO
+#undef AUDIO_DEVICE_ID
+#undef COLOR_SPACE
+#undef COLOR_RANGE
+#undef DEACTIVATE_WNS
+#undef AUTOROTATION
+#undef HW_DECODE
+#undef TEXT_INPUT_NAME
+#undef TEXT_DEVICE
+#undef TEXT_CONFIG_VIDEO
+#undef TEXT_CONFIG_XBAR
+#undef TEXT_RES_FPS_TYPE
+#undef TEXT_CUSTOM_RES
+#undef TEXT_PREFERRED_RES
+#undef TEXT_FPS_MATCHING
+#undef TEXT_FPS_HIGHEST
+#undef TEXT_RESOLUTION
+#undef TEXT_VIDEO_FORMAT
+#undef TEXT_FORMAT_UNKNOWN
+#undef TEXT_BUFFERING
+#undef TEXT_BUFFERING_AUTO
+#undef TEXT_BUFFERING_ON
+#undef TEXT_BUFFERING_OFF
+#undef TEXT_FLIP_IMAGE
+#undef TEXT_AUTOROTATION
+#undef TEXT_HW_DECODE
+#undef TEXT_AUDIO_MODE
+#undef TEXT_MODE_CAPTURE
+#undef TEXT_MODE_DSOUND
+#undef TEXT_MODE_WAVEOUT
+#undef TEXT_CUSTOM_AUDIO
+#undef TEXT_AUDIO_DEVICE
+#undef TEXT_ACTIVATE
+#undef TEXT_DEACTIVATE
+#undef TEXT_COLOR_SPACE
+#undef TEXT_COLOR_DEFAULT
+#undef TEXT_COLOR_709
+#undef TEXT_COLOR_601
+#undef TEXT_COLOR_2100PQ
+#undef TEXT_COLOR_2100HLG
+#undef TEXT_COLOR_RANGE
+#undef TEXT_RANGE_DEFAULT
+#undef TEXT_RANGE_PARTIAL
+#undef TEXT_RANGE_FULL
+#undef TEXT_DWNS
+#undef FPS_HIGHEST
+#undef FPS_MATCHING
+#undef DEVICE_INTERVAL_DIFF_LIMIT
+#undef ResolutionMatcher
+#undef FrameRateMatcher
+#undef VideoFormatMatcher
+#undef ClosestFrameRateSelector
+#undef MAKE_DSHOW_FPS
+#undef MAKE_DSHOW_FRACTIONAL_FPS

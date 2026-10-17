@@ -23,7 +23,7 @@ endif()
 
 target_sources(
   win-dshow
-  PRIVATE dshow-plugin.cpp encode-dstr.hpp ffmpeg-decode.c ffmpeg-decode.h win-dshow-encoder.cpp win-dshow.cpp
+  PRIVATE build/win-dshow.windows+.hpp.cpp build/win-dshow.decode-windows+.h.c encode-dstr.hpp ffmpeg-decode.h
 )
 
 configure_file(cmake/windows/obs-module.rc.in win-dshow.rc)
@@ -47,7 +47,7 @@ target_link_libraries(
 add_subdirectory(virtualcam-module)
 
 if(TARGET OBS::virtualcam AND TARGET OBS::virtualcam-guid)
-  target_sources(win-dshow PRIVATE virtualcam.c)
+  target_sources(win-dshow PRIVATE build/win-dshow.virtualcam-windows+.h.c)
   target_link_libraries(win-dshow PRIVATE OBS::virtualcam-guid)
   target_compile_definitions(win-dshow PRIVATE VIRTUALCAM_AVAILABLE)
 

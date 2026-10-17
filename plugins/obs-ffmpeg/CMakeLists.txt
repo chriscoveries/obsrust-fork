@@ -26,6 +26,8 @@ target_sources(
     $<$<PLATFORM_ID:Linux,FreeBSD,OpenBSD>:build/obs-ffmpeg.vaapi+.h.c>
     $<$<PLATFORM_ID:Linux,FreeBSD,OpenBSD>:build/obs-ffmpeg.vaapi-device-select+.h.c>
     $<$<PLATFORM_ID:Linux,FreeBSD,OpenBSD>:vaapi-device-select.h>
+    $<$<PLATFORM_ID:Linux,FreeBSD,OpenBSD>:build/obs-ffmpeg.vaapi-probe-policy+.h.c>
+    $<$<PLATFORM_ID:Linux,FreeBSD,OpenBSD>:vaapi-probe-policy.h>
     $<$<PLATFORM_ID:Linux,FreeBSD,OpenBSD>:vaapi-utils.h>
     build/obs-ffmpeg.core+.h.c
     build/obs-ffmpeg.mux+.h.c

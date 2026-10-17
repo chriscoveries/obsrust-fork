@@ -1,6 +1,4 @@
-#include <windows.h>
-#include <obs.h>
-#include "cursor-capture.h"
+#include "build/win-capture.pch.h"
 
 static uint8_t *get_bitmap_data(HBITMAP hbmp, BITMAP *bmp)
 {

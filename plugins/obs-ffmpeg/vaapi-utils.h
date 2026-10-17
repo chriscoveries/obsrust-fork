@@ -10,6 +10,7 @@
 
 VADisplay vaapi_open_device(int *fd, const char *device_path, const char *func_name);
 void vaapi_close_device(int *fd, VADisplay dpy);
+void vaapi_free_device_caps(void);
 
 bool vaapi_device_rc_supported(VAProfile profile, VADisplay dpy, uint32_t rc, const char *device_path);
 bool vaapi_device_bframe_supported(VAProfile profile, VADisplay dpy);

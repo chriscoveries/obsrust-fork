@@ -15,12 +15,7 @@
     along with this program.  If not, see <http://www.gnu.org/licenses/>.
 ******************************************************************************/
 
-#include "ffmpeg-decode.h"
-#include "obs-ffmpeg-compat.h"
-#include <obs-avc.h>
-#ifdef ENABLE_HEVC
-#include <obs-hevc.h>
-#endif
+#include "build/win-dshow-decode.pch.h"
 
 enum AVHWDeviceType hw_priority[] = {
 	AV_HWDEVICE_TYPE_D3D11VA,
@@ -37,8 +32,9 @@ static bool has_hw_type(const AVCodec *c, enum AVHWDeviceType type)
 			break;
 		}
 
-		if (config->methods & AV_CODEC_HW_CONFIG_METHOD_HW_DEVICE_CTX && config->device_type == type)
+		if (config->methods & AV_CODEC_HW_CONFIG_METHOD_HW_DEVICE_CTX && config->device_type == type) {
 			return true;
+		}
 	}
 
 	return false;
@@ -52,8 +48,9 @@ static void init_hw_decoder(struct ffmpeg_decode *d)
 	while (*priority != AV_HWDEVICE_TYPE_NONE) {
 		if (has_hw_type(d->codec, *priority)) {
 			int ret = av_hwdevice_ctx_create(&hw_ctx, *priority, NULL, NULL, 0);
-			if (ret == 0)
+			if (ret == 0) {
 				break;
+			}
 		}
 
 		priority++;
@@ -73,15 +70,17 @@ int ffmpeg_decode_init(struct ffmpeg_decode *decode, enum AVCodecID id, bool use
 	memset(decode, 0, sizeof(*decode));
 
 	decode->codec = avcodec_find_decoder(id);
-	if (!decode->codec)
+	if (!decode->codec) {
 		return -1;
+	}
 
 	decode->decoder = avcodec_alloc_context3(decode->codec);
 
 	decode->decoder->thread_count = 0;
 
-	if (use_hw)
+	if (use_hw) {
 		init_hw_decoder(decode);
+	}
 
 	ret = avcodec_open2(decode->decoder, decode->codec, NULL);
 	if (ret < 0) {
@@ -94,20 +93,25 @@ int ffmpeg_decode_init(struct ffmpeg_decode *decode, enum AVCodecID id, bool use
 
 void ffmpeg_decode_free(struct ffmpeg_decode *decode)
 {
-	if (decode->hw_frame)
+	if (decode->hw_frame) {
 		av_frame_free(&decode->hw_frame);
+	}
 
-	if (decode->decoder)
+	if (decode->decoder) {
 		avcodec_free_context(&decode->decoder);
+	}
 
-	if (decode->frame)
+	if (decode->frame) {
 		av_frame_free(&decode->frame);
+	}
 
-	if (decode->hw_device_ctx)
+	if (decode->hw_device_ctx) {
 		av_buffer_unref(&decode->hw_device_ctx);
+	}
 
-	if (decode->packet_buffer)
+	if (decode->packet_buffer) {
 		bfree(decode->packet_buffer);
+	}
 
 	memset(decode, 0, sizeof(*decode));
 }
@@ -223,8 +227,9 @@ bool ffmpeg_decode_audio(struct ffmpeg_decode *decode, uint8_t *data, size_t siz
 
 	if (!decode->frame) {
 		decode->frame = av_frame_alloc();
-		if (!decode->frame)
+		if (!decode->frame) {
 			return false;
+		}
 	}
 
 	if (data && size) {
@@ -236,21 +241,25 @@ bool ffmpeg_decode_audio(struct ffmpeg_decode *decode, uint8_t *data, size_t siz
 
 		av_packet_free(&packet);
 	}
-	if (ret == 0)
+	if (ret == 0) {
 		ret = avcodec_receive_frame(decode->decoder, decode->frame);
+	}
 
 	got_frame = (ret == 0);
 
-	if (ret == AVERROR_EOF || ret == AVERROR(EAGAIN))
+	if (ret == AVERROR_EOF || ret == AVERROR(EAGAIN)) {
 		ret = 0;
+	}
 
-	if (ret < 0)
+	if (ret < 0) {
 		return false;
-	else if (!got_frame)
+	} else if (!got_frame) {
 		return true;
+	}
 
-	for (size_t i = 0; i < MAX_AV_PLANES; i++)
+	for (size_t i = 0; i < MAX_AV_PLANES; i++) {
 		audio->data[i] = decode->frame->data[i];
+	}
 
 	audio->samples_per_sec = decode->frame->sample_rate;
 	audio->format = convert_sample_format(decode->frame->format);
@@ -258,8 +267,9 @@ bool ffmpeg_decode_audio(struct ffmpeg_decode *decode, uint8_t *data, size_t siz
 
 	audio->frames = decode->frame->nb_samples;
 
-	if (audio->format == AUDIO_FORMAT_UNKNOWN)
+	if (audio->format == AUDIO_FORMAT_UNKNOWN) {
 		return false;
+	}
 
 	*got_output = true;
 	return true;
@@ -299,13 +309,15 @@ bool ffmpeg_decode_video(struct ffmpeg_decode *decode, uint8_t *data, size_t siz
 
 	if (!decode->frame) {
 		decode->frame = av_frame_alloc();
-		if (!decode->frame)
+		if (!decode->frame) {
 			return false;
+		}
 
 		if (decode->hw && !decode->hw_frame) {
 			decode->hw_frame = av_frame_alloc();
-			if (!decode->hw_frame)
+			if (!decode->hw_frame) {
 				return false;
+			}
 		}
 	}
 
@@ -318,13 +330,15 @@ bool ffmpeg_decode_video(struct ffmpeg_decode *decode, uint8_t *data, size_t siz
 
 	switch (decode->codec->id) {
 	case AV_CODEC_ID_H264:
-		if (obs_avc_keyframe(data, size))
+		if (obs_avc_keyframe(data, size)) {
 			packet->flags |= AV_PKT_FLAG_KEY;
+		}
 #ifdef ENABLE_HEVC
 		break;
 	case AV_CODEC_ID_HEVC:
-		if (obs_hevc_keyframe(data, size))
+		if (obs_hevc_keyframe(data, size)) {
 			packet->flags |= AV_PKT_FLAG_KEY;
+		}
 #endif
 	}
 
@@ -337,13 +351,15 @@ bool ffmpeg_decode_video(struct ffmpeg_decode *decode, uint8_t *data, size_t siz
 
 	got_frame = (ret == 0);
 
-	if (ret == AVERROR_EOF || ret == AVERROR(EAGAIN))
+	if (ret == AVERROR_EOF || ret == AVERROR(EAGAIN)) {
 		ret = 0;
+	}
 
-	if (ret < 0)
+	if (ret < 0) {
 		return false;
-	else if (!got_frame)
+	} else if (!got_frame) {
 		return true;
+	}
 
 	if (got_frame && decode->hw) {
 		ret = av_hwframe_transfer_data(decode->frame, out_frame, 0);
@@ -406,8 +422,9 @@ bool ffmpeg_decode_video(struct ffmpeg_decode *decode, uint8_t *data, size_t siz
 		frame->trc = VIDEO_TRC_DEFAULT;
 	}
 
-	if (frame->format == VIDEO_FORMAT_NONE)
+	if (frame->format == VIDEO_FORMAT_NONE) {
 		return false;
+	}
 
 	*got_output = true;
 	return true;

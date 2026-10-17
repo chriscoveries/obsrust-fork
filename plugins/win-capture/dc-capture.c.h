@@ -1,7 +1,5 @@
-#include "dc-capture.h"
-
+#include "build/win-capture.pch.h"
 #define WIN32_LEAN_AND_MEAN
-#include <windows.h>
 
 static inline void init_textures(struct dc_capture *capture)
 {
@@ -240,3 +238,6 @@ void dc_capture_render(struct dc_capture *capture, bool texcoords_centered)
 		gs_enable_framebuffer_srgb(previous);
 	}
 }
+
+/* File-local macros (BUILD.md): out of the next file in the unity group. */
+#undef WIN32_LEAN_AND_MEAN

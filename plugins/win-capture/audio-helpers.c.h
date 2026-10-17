@@ -1,6 +1,4 @@
-#include "audio-helpers.h"
-
-#include <util/dstr.h>
+#include "build/win-capture.pch.h"
 
 static inline bool settings_changed(obs_data_t *old_settings, obs_data_t *new_settings)
 {

@@ -27,7 +27,6 @@ set(OBS_UNITY_BUILD_BATCH_SIZE 8 CACHE STRING "Sources per unity translation uni
 # earlier source's `using namespace std` (std::byte) in the same batch.
 set(
   _OBS_UNITY_SKIP_SOURCES
-  plugins/win-capture/window-capture.c
   plugins/frontend-tools/captions.cpp
   plugins/frontend-tools/captions-mssapi.cpp
   plugins/frontend-tools/captions-mssapi-stream.cpp

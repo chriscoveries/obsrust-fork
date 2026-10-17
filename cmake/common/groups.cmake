@@ -97,7 +97,7 @@ function(_obs_target_groups target)
   endforeach()
   # Only the target's own plain sources make it mixed: one an INTERFACE
   # library hands a grouped target (OBS::obfuscate's obfuscate.c in libobs)
-  # just compiles on its own.
+  # just compiles on its own, without the groups' precompiled header.
   set(_groups "")
   set(_others "")
   foreach(_absolute IN LISTS _candidates)
@@ -107,9 +107,12 @@ function(_obs_target_groups target)
       list(APPEND _others "${_absolute}")
     endif()
   endforeach()
+  set(_interface_plain "")
   foreach(_absolute IN LISTS _interface)
     if(_absolute MATCHES "${_OBS_GROUP_REGEX}")
       list(APPEND _groups "${_absolute}")
+    elseif(_absolute MATCHES "\\.(c|cc|cpp|cxx|m|mm)$")
+      list(APPEND _interface_plain "${_absolute}")
     endif()
   endforeach()
   list(REMOVE_DUPLICATES _groups)
@@ -131,6 +134,12 @@ function(_obs_target_groups target)
     return()
   endif()
   set_property(TARGET ${target} PROPERTY OBS_GROUPED TRUE)
+  # The groups' header is theirs, not the linked library's sources'
+  # (libdshowcapture's in win-dshow, which need winsock2 before <windows.h>):
+  # those compile without it, as in their own project.
+  if(_interface_plain)
+    set_source_files_properties(${_interface_plain} TARGET_DIRECTORY ${target} PROPERTIES SKIP_PRECOMPILE_HEADERS ON)
+  endif()
 
   set(_languages "")
   set(_own_options "")

@@ -1,12 +1,4 @@
-#include <obs-module.h>
-#include <obs-avc.h>
-#include <util/darray.h>
-#include <util/dstr.hpp>
-#ifdef OBS_LEGACY
-#include "libdshowcapture/dshowcapture.hpp"
-#else
-#include <dshowcapture.hpp>
-#endif
+#include "build/win-dshow.pch.hpp"
 
 using namespace DShow;
 using namespace std;

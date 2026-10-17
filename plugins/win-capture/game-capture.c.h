@@ -1,24 +1,4 @@
-#include <inttypes.h>
-#include <obs-module.h>
-#include <obs-hotkey.h>
-#include <util/dstr.h>
-#include <util/platform.h>
-#include <util/threading.h>
-#include <util/windows/window-helpers.h>
-#include <windows.h>
-#include <dxgi.h>
-#include <util/sse-intrin.h>
-#include <util/util_uint64.h>
-#include <ipc-util/pipe.h>
-#include <util/windows/obfuscate.h>
-#include "inject-library.h"
-#include "compat-helpers.h"
-#include "graphics-hook-info.h"
-#include "graphics-hook-ver.h"
-#include "cursor-capture.h"
-#include "app-helpers.h"
-#include "audio-helpers.h"
-#include "nt-stuff.h"
+#include "build/win-capture.pch.h"
 
 #define do_log(level, format, ...) \
 	blog(level, "[game-capture: '%s'] " format, obs_source_get_name(gc->source), ##__VA_ARGS__)
@@ -2356,3 +2336,59 @@ struct obs_source_info game_capture_info = {
 /* File-local macros: keep them out of the next source of a unity build. */
 #undef do_log
 #undef warn
+
+/* File-local macros (BUILD.md): out of the next file in the unity group. */
+#undef info
+#undef debug
+#undef SETTING_MODE
+#undef SETTING_CAPTURE_WINDOW
+#undef SETTING_WINDOW_PRIORITY
+#undef SETTING_COMPATIBILITY
+#undef SETTING_CURSOR
+#undef SETTING_TRANSPARENCY
+#undef SETTING_PREMULTIPLIED_ALPHA
+#undef SETTING_LIMIT_FRAMERATE
+#undef SETTING_CAPTURE_OVERLAYS
+#undef SETTING_ANTI_CHEAT_HOOK
+#undef SETTING_HOOK_RATE
+#undef SETTING_RGBA10A2_SPACE
+#undef SETTINGS_COMPAT_INFO
+#undef SETTING_ANY_FULLSCREEN
+#undef SETTING_MODE_ANY
+#undef SETTING_MODE_WINDOW
+#undef SETTING_MODE_HOTKEY
+#undef HOTKEY_START
+#undef HOTKEY_STOP
+#undef TEXT_MODE
+#undef TEXT_GAME_CAPTURE
+#undef TEXT_ANY_FULLSCREEN
+#undef TEXT_SLI_COMPATIBILITY
+#undef TEXT_ALLOW_TRANSPARENCY
+#undef TEXT_PREMULTIPLIED_ALPHA
+#undef TEXT_WINDOW
+#undef TEXT_MATCH_PRIORITY
+#undef TEXT_MATCH_TITLE
+#undef TEXT_MATCH_CLASS
+#undef TEXT_MATCH_EXE
+#undef TEXT_CAPTURE_CURSOR
+#undef TEXT_LIMIT_FRAMERATE
+#undef TEXT_CAPTURE_OVERLAYS
+#undef TEXT_ANTI_CHEAT_HOOK
+#undef TEXT_HOOK_RATE
+#undef TEXT_HOOK_RATE_SLOW
+#undef TEXT_HOOK_RATE_NORMAL
+#undef TEXT_HOOK_RATE_FAST
+#undef TEXT_HOOK_RATE_FASTEST
+#undef TEXT_RGBA10A2_SPACE
+#undef TEXT_RGBA10A2_SPACE_SRGB
+#undef TEXT_RGBA10A2_SPACE_2100PQ
+#undef TEXT_MODE_ANY
+#undef TEXT_MODE_WINDOW
+#undef TEXT_MODE_HOTKEY
+#undef TEXT_HOTKEY_START
+#undef TEXT_HOTKEY_STOP
+#undef DEFAULT_RETRY_INTERVAL
+#undef ERROR_RETRY_INTERVAL
+#undef RGBA10A2_SPACE_SRGB
+#undef RGBA10A2_SPACE_2100PQ
+#undef STOP_BEING_BAD

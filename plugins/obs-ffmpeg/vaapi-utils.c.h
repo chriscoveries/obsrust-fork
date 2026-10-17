@@ -6,6 +6,14 @@
 
 static bool version_logged = false;
 
+/* Each render node is opened once and its answer for every codec kept
+ * (vaapi-probe-policy.h): opening one can take most of a second. */
+static struct vaapi_caps_cache device_caps = {0};
+static pthread_mutex_t device_caps_mutex = PTHREAD_MUTEX_INITIALIZER;
+static bool render_nodes_probed = false;
+
+static uint32_t vaapi_probe_device(const char *device_path);
+
 inline static VADisplay vaapi_open_display_drm(int *fd, const char *device_path)
 {
 	VADisplay va_dpy;
@@ -215,20 +223,7 @@ bool vaapi_display_h264_supported(VADisplay dpy, const char *device_path)
 
 bool vaapi_device_h264_supported(const char *device_path)
 {
-	bool ret = false;
-	VADisplay va_dpy;
-
-	int drm_fd = -1;
-
-	va_dpy = vaapi_open_device(&drm_fd, device_path, "vaapi_device_h264_supported");
-	if (!va_dpy)
-		return false;
-
-	ret = vaapi_display_h264_supported(va_dpy, device_path);
-
-	vaapi_close_device(&drm_fd, va_dpy);
-
-	return ret;
+	return (vaapi_probe_device(device_path) & VAAPI_CODEC_H264) != 0;
 }
 
 const char *vaapi_get_h264_default_device()
@@ -269,20 +264,7 @@ bool vaapi_display_av1_supported(VADisplay dpy, const char *device_path)
 
 bool vaapi_device_av1_supported(const char *device_path)
 {
-	bool ret = false;
-	VADisplay va_dpy;
-
-	int drm_fd = -1;
-
-	va_dpy = vaapi_open_device(&drm_fd, device_path, "vaapi_device_av1_supported");
-	if (!va_dpy)
-		return false;
-
-	ret = vaapi_display_av1_supported(va_dpy, device_path);
-
-	vaapi_close_device(&drm_fd, va_dpy);
-
-	return ret;
+	return (vaapi_probe_device(device_path) & VAAPI_CODEC_AV1) != 0;
 }
 
 const char *vaapi_get_av1_default_device()
@@ -327,20 +309,7 @@ bool vaapi_display_hevc_supported(VADisplay dpy, const char *device_path)
 
 bool vaapi_device_hevc_supported(const char *device_path)
 {
-	bool ret = false;
-	VADisplay va_dpy;
-
-	int drm_fd = -1;
-
-	va_dpy = vaapi_open_device(&drm_fd, device_path, "vaapi_device_hevc_supported");
-	if (!va_dpy)
-		return false;
-
-	ret = vaapi_display_hevc_supported(va_dpy, device_path);
-
-	vaapi_close_device(&drm_fd, va_dpy);
-
-	return ret;
+	return (vaapi_probe_device(device_path) & VAAPI_CODEC_HEVC) != 0;
 }
 
 const char *vaapi_get_hevc_default_device()
@@ -368,6 +337,133 @@ const char *vaapi_get_hevc_default_device()
 
 #endif // #ifdef ENABLE_HEVC
 
+/* Whether the device's driver cannot encode (vaapi_driver_is_decode_only()),
+ * read from the kernel driver link of its DRM node. */
+static bool vaapi_device_decode_only(const char *device_path)
+{
+	char *node = realpath(device_path, NULL);
+	if (!node)
+		return false;
+
+	char link[PATH_MAX];
+	char target[PATH_MAX];
+	const char *name = strrchr(node, '/');
+	snprintf(link, sizeof(link), "/sys/class/drm/%s/device/driver", name ? name + 1 : node);
+	free(node);
+
+	ssize_t len = readlink(link, target, sizeof(target) - 1);
+	if (len <= 0)
+		return false;
+	target[len] = '\0';
+
+	return vaapi_driver_is_decode_only(target, getenv("LIBVA_DRIVER_NAME"));
+}
+
+static uint32_t vaapi_probe_device_uncached(const char *device_path)
+{
+	uint32_t flags = 0;
+	int drm_fd = -1;
+
+	if (vaapi_device_decode_only(device_path)) {
+		blog(LOG_INFO, "VAAPI: Skipping '%s': its driver (nvidia-vaapi-driver) does not encode", device_path);
+		return flags;
+	}
+
+	VADisplay va_dpy = vaapi_open_device(&drm_fd, device_path, "vaapi_probe_device");
+	if (!va_dpy)
+		return flags;
+
+	if (vaapi_display_h264_supported(va_dpy, device_path))
+		flags |= VAAPI_CODEC_H264;
+	if (vaapi_display_av1_supported(va_dpy, device_path))
+		flags |= VAAPI_CODEC_AV1;
+#ifdef ENABLE_HEVC
+	if (vaapi_display_hevc_supported(va_dpy, device_path))
+		flags |= VAAPI_CODEC_HEVC;
+#endif
+
+	vaapi_close_device(&drm_fd, va_dpy);
+	return flags;
+}
+
+#define VAAPI_MAX_RENDER_NODES 64
+
+struct vaapi_probe_job {
+	char path[32];
+	uint32_t flags;
+	pthread_t thread;
+	bool started;
+};
+
+static void *vaapi_probe_thread(void *param)
+{
+	struct vaapi_probe_job *job = param;
+	job->flags = vaapi_probe_device_uncached(job->path);
+	return NULL;
+}
+
+/* The render nodes the default-device lookups walk (/dev/dri/renderD128 and
+ * up) are opened at the same time, one thread each, so a machine with several
+ * GPUs waits for the slowest one instead of the sum. Called with
+ * device_caps_mutex held. */
+static void vaapi_probe_render_nodes(void)
+{
+	struct vaapi_probe_job jobs[VAAPI_MAX_RENDER_NODES];
+	size_t count = 0;
+
+	if (render_nodes_probed)
+		return;
+	render_nodes_probed = true;
+
+	for (int i = 28; count < VAAPI_MAX_RENDER_NODES; i++) {
+		struct vaapi_probe_job *job = &jobs[count];
+		snprintf(job->path, sizeof(job->path), "/dev/dri/renderD1%d", i);
+		if (access(job->path, F_OK) != 0)
+			break;
+		job->flags = 0;
+		job->started = pthread_create(&job->thread, NULL, vaapi_probe_thread, job) == 0;
+		count++;
+	}
+
+	for (size_t i = 0; i < count; i++) {
+		if (jobs[i].started)
+			pthread_join(jobs[i].thread, NULL);
+		else
+			jobs[i].flags = vaapi_probe_device_uncached(jobs[i].path);
+	}
+
+	for (size_t i = 0; i < count; i++)
+		vaapi_caps_cache_add(&device_caps, jobs[i].path, jobs[i].flags);
+}
+
+static uint32_t vaapi_probe_device_cb(const char *device_path, void *param)
+{
+	UNUSED_PARAMETER(param);
+	return vaapi_probe_device_uncached(device_path);
+}
+
+static uint32_t vaapi_probe_device(const char *device_path)
+{
+	if (!device_path)
+		return 0;
+
+	pthread_mutex_lock(&device_caps_mutex);
+	if (strncmp(device_path, "/dev/dri/renderD", 16) == 0)
+		vaapi_probe_render_nodes();
+	uint32_t flags = vaapi_caps_cache_get(&device_caps, device_path, vaapi_probe_device_cb, NULL);
+	pthread_mutex_unlock(&device_caps_mutex);
+	return flags;
+}
+
+void vaapi_free_device_caps(void)
+{
+	pthread_mutex_lock(&device_caps_mutex);
+	vaapi_caps_cache_free(&device_caps);
+	render_nodes_probed = false;
+	pthread_mutex_unlock(&device_caps_mutex);
+}
+
 /* File-local macros (BUILD.md): out of the next file in the unity group. */
 #undef CHECK_PROFILE
 #undef CHECK_PROFILE_LP
+#undef VAAPI_MAX_RENDER_NODES

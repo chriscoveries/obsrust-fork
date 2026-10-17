@@ -1,7 +1,4 @@
-#include <obs-module.h>
-#include <util/platform.h>
-#include "util/threading.h"
-#include "shared-memory-queue.h"
+#include "build/win-dshow-virtualcam.pch.h"
 
 struct virtualcam_data {
 	obs_output_t *output;
@@ -95,11 +92,13 @@ static void virtual_video(void *param, struct video_data *frame)
 {
 	struct virtualcam_data *vcam = (struct virtualcam_data *)param;
 
-	if (!vcam->vq)
+	if (!vcam->vq) {
 		return;
+	}
 
-	if (!os_atomic_load_bool(&vcam->active))
+	if (!os_atomic_load_bool(&vcam->active)) {
 		return;
+	}
 
 	if (os_atomic_load_bool(&vcam->stopping)) {
 		virtualcam_deactive(vcam);

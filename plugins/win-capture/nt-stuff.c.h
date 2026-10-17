@@ -1,6 +1,4 @@
-#include <windows.h>
-#include <winternl.h>
-#include <stdbool.h>
+#include "build/win-capture.pch.h"
 
 #define THREAD_STATE_WAITING 5
 #define THREAD_WAIT_REASON_SUSPENDED 5
@@ -231,3 +229,11 @@ HANDLE nt_create_mutex(const wchar_t *name)
 	nt_set_last_error(status);
 	return NULL;
 }
+
+/* File-local macros (BUILD.md): out of the next file in the unity group. */
+#undef THREAD_STATE_WAITING
+#undef THREAD_WAIT_REASON_SUSPENDED
+#undef NT_SUCCESS
+#undef STATUS_INFO_LENGTH_MISMATCH
+#undef init_named_attribs
+#undef MAKE_NT_OPEN_FUNC

@@ -1,9 +1,4 @@
-#include <obs-module.h>
-#include <strsafe.h>
-#include <strmif.h>
-#ifdef VIRTUALCAM_AVAILABLE
-#include "virtualcam-guid.h"
-#endif
+#include "build/win-dshow.pch.hpp"
 
 OBS_DECLARE_MODULE()
 OBS_MODULE_USE_DEFAULT_LOCALE("win-dshow", "en-US")

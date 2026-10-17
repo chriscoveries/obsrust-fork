@@ -1,5 +1,4 @@
-#include <util/dstr.h>
-#include "dc-capture.h"
+#include "build/win-capture.pch.h"
 
 /* clang-format off */
 
@@ -229,3 +228,10 @@ struct obs_source_info monitor_capture_info = {
 	.get_properties = monitor_capture_properties,
 	.icon_type = OBS_ICON_TYPE_DESKTOP_CAPTURE,
 };
+
+/* File-local macros (BUILD.md): out of the next file in the unity group. */
+#undef TEXT_MONITOR_CAPTURE
+#undef TEXT_CAPTURE_CURSOR
+#undef TEXT_COMPATIBILITY
+#undef TEXT_MONITOR
+#undef TEXT_PRIMARY_MONITOR

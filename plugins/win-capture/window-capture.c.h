@@ -1,18 +1,4 @@
-#include <stdlib.h>
-#include <util/dstr.h>
-#include <util/threading.h>
-#include <util/windows/window-helpers.h>
-
-#include "dc-capture.h"
-#include "audio-helpers.h"
-#include "compat-helpers.h"
-#ifdef OBS_LEGACY
-#include "../../libobs/util/platform.h"
-#include "../../libobs-winrt/winrt-capture.h"
-#else
-#include <util/platform.h>
-#include <winrt-capture.h>
-#endif
+#include "build/win-capture.pch.h"
 
 /* clang-format off */
 
@@ -848,3 +834,21 @@ struct obs_source_info window_capture_info = {
 /* File-local macros: keep them out of the next source of a unity build. */
 #undef TEXT_METHOD
 #undef TEXT_METHOD_WGC
+
+/* File-local macros (BUILD.md): out of the next file in the unity group. */
+#undef TEXT_WINDOW_CAPTURE
+#undef TEXT_WINDOW
+#undef TEXT_METHOD_AUTO
+#undef TEXT_METHOD_BITBLT
+#undef TEXT_MATCH_PRIORITY
+#undef TEXT_MATCH_TITLE
+#undef TEXT_MATCH_CLASS
+#undef TEXT_MATCH_EXE
+#undef TEXT_CAPTURE_CURSOR
+#undef TEXT_COMPATIBILITY
+#undef TEXT_CLIENT_AREA
+#undef TEXT_FORCE_SDR
+#undef WC_CHECK_TIMER
+#undef RESIZE_CHECK_TIME
+#undef CURSOR_CHECK_TIME
+#undef WINRT_IMPORT

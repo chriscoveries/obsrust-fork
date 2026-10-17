@@ -1,16 +1,4 @@
-#include <windows.h>
-#include <obs-module.h>
-#include <util/dstr.h>
-#include <util/windows/win-version.h>
-#include <util/platform.h>
-
-#include <file-updater/file-updater.h>
-
-#include "compat-helpers.h"
-#include "compat-format-ver.h"
-#ifdef OBS_LEGACY
-#include "compat-config.h"
-#endif
+#include "build/win-capture.pch.h"
 
 #define WIN_CAPTURE_LOG_STRING "[win-capture plugin] "
 #define WIN_CAPTURE_VER_STRING "win-capture plugin (libobs " OBS_VERSION ")"
@@ -159,3 +147,8 @@ void obs_module_unload(void)
 	update_info_destroy(update_info);
 	compat_json_free();
 }
+
+/* File-local macros (BUILD.md): out of the next file in the unity group. */
+#undef WIN_CAPTURE_LOG_STRING
+#undef WIN_CAPTURE_VER_STRING
+#undef IS32BIT
