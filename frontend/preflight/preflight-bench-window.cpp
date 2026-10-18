@@ -48,6 +48,7 @@
 #include <QPainterPath>
 #include <QPolygonF>
 #include <QPushButton>
+#include <QResizeEvent>
 #include <QScrollArea>
 #include <QScreen>
 #include <QSignalBlocker>
@@ -111,8 +112,12 @@ constexpr size_t MAX_ENGINE_WINDOWS = 120;
 constexpr size_t CHART_HISTORY_SIZE = 120;
 constexpr int MAX_BAKEOFF_TABLE_VIEW_HEIGHT = 280;
 constexpr int MAX_IMPACT_TABLE_VIEW_HEIGHT = 270;
+constexpr int MIN_IMPACT_GROUP_VIEW_HEIGHT = 80;
+constexpr int MAX_IMPACT_GROUP_VIEW_HEIGHT = MAX_IMPACT_TABLE_VIEW_HEIGHT + 40;
+// At the 720 px laptop fixture, keep Impact compact; each extra window pixel can reveal more rows.
+constexpr int IMPACT_GROUP_WINDOW_HEIGHT_OFFSET = 640;
 // Reserve enough vertical room for the 4:3 encoded picture to clear the 2x render-size regression check.
-constexpr int MIN_LOUPE_VIEW_HEIGHT = 195;
+constexpr int MIN_LOUPE_VIEW_HEIGHT = 230;
 
 // Reads the text colour the active OBS theme gives a class such as "text-warning", so painted
 // charts use the same warning and danger colours as the Stats window.
@@ -211,7 +216,7 @@ public:
 	explicit CombinedMetricChart(QWidget *parent = nullptr) : QWidget(parent)
 	{
 		setObjectName(QStringLiteral("preflight-combined-chart"));
-		setMinimumHeight(220);
+		setMinimumHeight(190);
 		setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
 		setMouseTracking(true);
 		setProperty("preflightStartsAtZero", true);
@@ -610,8 +615,12 @@ protected:
 			QRectF(preview_panel.right() + gap, source_zoom_panel.bottom() + gap, zoom_width, zoom_height);
 		recording_zoom_panel =
 			QRectF(preview_panel.right() + gap, encoded_zoom_panel.bottom() + gap, zoom_width, zoom_height);
-		for (const QRectF &panel :
-		     {preview_panel, source_zoom_panel, encoded_zoom_panel, recording_zoom_panel}) {
+		const std::array<QRectF, 4> panels = {preview_panel, source_zoom_panel, encoded_zoom_panel,
+						      recording_zoom_panel};
+		setProperty("preflightLoupePanelsInsideView",
+			    std::all_of(panels.begin(), panels.end(),
+					[&bounds](const QRectF &panel) { return bounds.contains(panel); }));
+		for (const QRectF &panel : panels) {
 			painter.setPen(palette().color(QPalette::Mid));
 			painter.drawRect(panel);
 		}
@@ -627,6 +636,7 @@ protected:
 		const auto &encoded = *stream_pair->encoded;
 		const QRectF preview_bounds = preview_panel.adjusted(2, 22, -2, -2);
 		preview_image_rect = fitted_image_rect(preview_bounds, encoded);
+		setProperty("preflightPreviewImageRect", preview_image_rect.toRect());
 		setProperty("preflightPreviewImageWidth", qRound(preview_image_rect.width()));
 		setProperty("preflightPreviewImageHeight", qRound(preview_image_rect.height()));
 		painter.setRenderHint(QPainter::SmoothPixmapTransform, false);
@@ -929,6 +939,7 @@ struct PreflightBenchWindow::Impl : preflight::bench::DataApi {
 	QTableWidget *bakeoff_table = nullptr;
 	QTableWidget *metric_table = nullptr;
 	QTableWidget *impact_table = nullptr;
+	QGroupBox *impact_group = nullptr;
 	CombinedMetricChart *combined_chart = nullptr;
 	QGroupBox *apply_group = nullptr;
 	QLabel *apply_mode_label = nullptr;
@@ -2556,7 +2567,8 @@ struct PreflightBenchWindow::Impl : preflight::bench::DataApi {
 					   impact_table->verticalHeader()->length() + impact_table->frameWidth() * 2 +
 					   2;
 		const int visible_height = std::min(content_height, MAX_IMPACT_TABLE_VIEW_HEIGHT);
-		impact_table->setMinimumHeight(visible_height);
+		// Impact may scroll in a short window, so it must not impose its full content height.
+		impact_table->setMinimumHeight(0);
 		impact_table->setMaximumHeight(visible_height);
 	}
 
@@ -2681,6 +2693,16 @@ struct PreflightBenchWindow::Impl : preflight::bench::DataApi {
 		apply_table->setFixedHeight(std::min(content_height, 190));
 	}
 
+	void ResizeImpactPanelForWindow(int window_height)
+	{
+		if (!impact_group) {
+			return;
+		}
+		const int maximum_height = std::clamp(window_height - IMPACT_GROUP_WINDOW_HEIGHT_OFFSET,
+						      MIN_IMPACT_GROUP_VIEW_HEIGHT, MAX_IMPACT_GROUP_VIEW_HEIGHT);
+		impact_group->setMaximumHeight(maximum_height);
+	}
+
 	void BuildUi()
 	{
 		auto *root = new QVBoxLayout(dialog);
@@ -2761,7 +2783,7 @@ struct PreflightBenchWindow::Impl : preflight::bench::DataApi {
 		right_side->setObjectName(QStringLiteral("preflight-right-side"));
 		auto *right_layout = new QVBoxLayout(right_side);
 		right_layout->setContentsMargins(8, 4, 4, 4);
-		right_layout->setSpacing(8);
+		right_layout->setSpacing(4);
 		one_screen->addWidget(right_side);
 		one_screen->setStretchFactor(0, 0);
 		one_screen->setStretchFactor(1, 1);
@@ -2903,7 +2925,7 @@ struct PreflightBenchWindow::Impl : preflight::bench::DataApi {
 		preview_layout->addWidget(loupe_view, 1);
 		preview_layout->addWidget(loupe_status_label);
 		right_layout->insertWidget(0, preview_group, 2);
-		auto *impact_group = new QGroupBox(QObject::tr("Impact"), right_side);
+		impact_group = new QGroupBox(QObject::tr("Impact"), right_side);
 		impact_group->setObjectName(QStringLiteral("preflight-impact-group"));
 		auto *impact_layout = new QVBoxLayout(impact_group);
 		impact_layout->setContentsMargins(2, 1, 2, 2);
@@ -2936,12 +2958,16 @@ struct PreflightBenchWindow::Impl : preflight::bench::DataApi {
 		impact_table->setColumnWidth(2, 140);
 		impact_table->setColumnWidth(4, 74);
 		impact_table->setMaximumHeight(MAX_IMPACT_TABLE_VIEW_HEIGHT);
-		impact_table->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Maximum);
+		impact_table->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+		impact_table->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
 		impact_layout->addWidget(impact_table);
+		impact_group->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+		impact_group->setMaximumHeight(MIN_IMPACT_GROUP_VIEW_HEIGHT);
 		right_layout->addWidget(impact_group);
-		// Keep Impact at its content height; use the remaining pixels for the preview and chart.
+		// Preserve the full preview first, then give the chart the remaining height.
+		// Impact uses its content height when it fits and scrolls when it does not.
 		right_layout->setStretch(0, 9);
-		right_layout->setStretch(1, 5);
+		right_layout->setStretch(1, 4);
 		right_layout->setStretch(2, 0);
 
 		auto *stream_group = new QGroupBox(QObject::tr("Stream encoder"), settings);
@@ -4121,6 +4147,14 @@ void PreflightBenchWindow::closeEvent(QCloseEvent *event)
 		return;
 	}
 	event->accept();
+}
+
+void PreflightBenchWindow::resizeEvent(QResizeEvent *event)
+{
+	QDialog::resizeEvent(event);
+	if (impl) {
+		impl->ResizeImpactPanelForWindow(event->size().height());
+	}
 }
 
 void PreflightBenchWindow::ToggleBench()

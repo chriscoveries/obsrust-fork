@@ -16,6 +16,7 @@
 #include <QMouseEvent>
 #include <QPixmap>
 #include <QPushButton>
+#include <QRegion>
 #include <QScrollArea>
 #include <QScrollBar>
 #include <QTableWidget>
@@ -759,9 +760,11 @@ int main(int argc, char **argv)
 		const int impact_content_height = impact_list->horizontalHeader()->sizeHint().height() +
 						  impact_list->verticalHeader()->length() +
 						  impact_list->frameWidth() * 2;
-		require(impact_list->verticalScrollBar()->maximum() == 0 &&
-				impact_list->height() >= impact_content_height - 2,
-			"both impact rows are not fully visible at 1040×720");
+		const bool impact_fits = impact_list->verticalScrollBar()->maximum() == 0 &&
+					 impact_list->height() >= impact_content_height - 2;
+		const bool impact_scrolls = impact_list->verticalScrollBar()->maximum() > 0 &&
+					    impact_list->verticalScrollBar()->isVisible();
+		require(impact_fits || impact_scrolls, "impact rows are clipped without a working vertical scrollbar");
 		auto *impact_group = window.findChild<QWidget *>(QStringLiteral("preflight-impact-group"));
 		require(impact_group && impact_group->isVisible() &&
 				impact_group->geometry().bottom() <= right_side->height(),
@@ -791,15 +794,32 @@ int main(int argc, char **argv)
 				reason_label->text().contains(QStringLiteral("1%")),
 			"legend limits and verdict threshold do not agree or their sources are missing from tooltips");
 		auto *combined_chart = window.findChild<QWidget *>(QStringLiteral("preflight-combined-chart"));
-		require(combined_chart && combined_chart->isVisible() && combined_chart->minimumHeight() >= 220 &&
+		require(combined_chart && combined_chart->isVisible() && combined_chart->minimumHeight() >= 190 &&
 				combined_chart->property("preflightStartsAtZero").toBool(),
 			"combined normalized chart is missing or too small");
 		combined_chart->repaint();
 		auto *loupe_widget = window.findChild<QWidget *>(QStringLiteral("preflight-loupe-view"));
-		require(loupe_widget && loupe_widget->property("preflightMainPreviewShare").toDouble() >= 0.59 &&
-				combined_chart->height() > 200,
-			"main preview or chart did not receive the space freed by the hidden legend");
+		auto *preview_group = window.findChild<QWidget *>(QStringLiteral("preflight-live-preview"));
+		auto *metrics_group = window.findChild<QWidget *>(QStringLiteral("preflight-metrics"));
+		std::cout << "1040×720 layout: preview " << (preview_group ? preview_group->height() : -1)
+			  << " px; loupe " << (loupe_widget ? loupe_widget->height() : -1) << " px; chart group "
+			  << (metrics_group ? metrics_group->height() : -1) << " px; chart "
+			  << (combined_chart ? combined_chart->height() : -1) << " px; impact "
+			  << (impact_group ? impact_group->height() : -1) << " px\n";
+		require(loupe_widget && preview_group && metrics_group &&
+				loupe_widget->property("preflightMainPreviewShare").toDouble() >= 0.59 &&
+				combined_chart->height() >= 180 && preview_group->height() > metrics_group->height(),
+			"preview is not the largest element while keeping a usable chart");
 		loupe_widget->repaint();
+		const QRegion loupe_visible_region = loupe_widget->visibleRegion();
+		const QRect preview_image_rect = loupe_widget->property("preflightPreviewImageRect").toRect();
+		require(preview_group->visibleRegion().boundingRect() == preview_group->rect() &&
+				preview_group->geometry().bottom() <= right_side->rect().bottom() &&
+				preview_group->contentsRect().contains(loupe_widget->geometry()) &&
+				loupe_visible_region.contains(loupe_widget->rect()) &&
+				loupe_widget->property("preflightLoupePanelsInsideView").toBool() &&
+				loupe_widget->rect().contains(preview_image_rect),
+			"preview image or one of the three loupe panels is clipped at 1040×720");
 		const int render_scale = qRound(loupe_widget->devicePixelRatioF());
 		const int preview_width_px =
 			loupe_widget->property("preflightPreviewImageWidth").toInt() * render_scale;
@@ -809,11 +829,11 @@ int main(int argc, char **argv)
 		const int plot_height_px = combined_chart->property("preflightPlotHeight").toInt() * render_scale;
 		std::cout << "2x PNG geometry: stream " << preview_width_px << "×" << preview_height_px
 			  << " px; chart plot " << plot_width_px << "×" << plot_height_px << " px\n";
-		// The 2d25ba671 render measured about 250×190 px for the stream pattern and had
-		// a 352 px plot at 2x. Keep both priorities larger at the laptop-sized 1040×720 default.
-		require(render_scale == 2 && preview_width_px >= 440 && preview_height_px >= 330 &&
-				plot_width_px >= 1280 && plot_height_px >= 360,
-			"the 1040×720 render must provide a larger stream image and chart plot area");
+		// The previous 1040×720 render measured 446×334 px for the stream. Give the
+		// preview first priority and keep a 300 px chart plot at 2x with Impact scrollable.
+		require(render_scale == 2 && preview_width_px >= 480 && preview_height_px >= 360 &&
+				plot_width_px >= 1280 && plot_height_px >= 300,
+			"the 1040×720 render must provide a larger, fully visible stream image and chart plot area");
 		QStringList axis = combined_chart->property("preflightYAxisLabels").toStringList();
 		require(axis.size() == 5 && axis.front() == QStringLiteral("120") &&
 				axis.back() == QStringLiteral("0") &&
