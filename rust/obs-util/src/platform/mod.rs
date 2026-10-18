@@ -17,13 +17,38 @@ pub enum EventType {
 cfg_select! {
     unix => {
         pub mod unix;
-        pub use unix::{Event, Pipe, Sem, close_file, path_from_bytes};
+        pub use unix::{Event, Pipe, Sem, close_file, crt, path_from_bytes};
     }
     windows => {
         #[allow(unsafe_code)] // Win32 handle and string calls; see the module docs
         pub mod windows;
-        pub use windows::{Event, Pipe, Sem, close_file, path_from_bytes};
+        pub use windows::{Event, Pipe, Sem, close_file, crt, path_from_bytes};
     }
+}
+
+/// `os_strtod` from `libobs/util/platform-number.c`: copy the first 63
+/// bytes, translate the first `.` to the current locale's decimal point,
+/// then let the host C runtime parse and round the value.
+pub fn os_strtod(bytes: &[u8]) -> f64 {
+    let mut buf: Vec<u8> = bytes
+        .iter()
+        .copied()
+        .take(63)
+        .take_while(|&b| b != 0)
+        .collect();
+    let point = crt::decimal_point();
+    if point != b'.'
+        && let Some(pos) = buf.iter().position(|&b| b == b'.')
+    {
+        if point == 0 {
+            buf.truncate(pos);
+        } else {
+            buf[pos] = point;
+        }
+    }
+    // The buffer ends at its first NUL, so CString construction cannot fail.
+    let value = std::ffi::CString::new(buf).unwrap_or_default();
+    crt::strtod(&value)
 }
 
 cfg_select! {

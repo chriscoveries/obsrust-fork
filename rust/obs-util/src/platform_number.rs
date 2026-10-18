@@ -45,18 +45,6 @@ fn starts_ci(b: &[u8], pat: &[u8]) -> bool {
     b.len() >= pat.len() && b[..pat.len()].eq_ignore_ascii_case(pat)
 }
 
-fn is_hex_digit(c: u8) -> bool {
-    c.is_ascii_digit() || (b'a'..=b'f').contains(&c) || (b'A'..=b'F').contains(&c)
-}
-
-fn hex_val(c: u8) -> u64 {
-    match c {
-        b'0'..=b'9' => u64::from(c - b'0'),
-        b'a'..=b'f' => u64::from(c - b'a' + 10),
-        _ => u64::from(c - b'A' + 10),
-    }
-}
-
 /// `strtod`: parse the valid prefix like the C library. Covers leading
 /// space, sign, `inf`/`infinity`, `nan(...)`, `0x` hex floats with `p`
 /// exponent, and decimal floats with `e` exponent. No conversion -> 0.
@@ -85,15 +73,11 @@ fn parse_double(b: &[u8]) -> f64 {
         return if neg { -f64::NAN } else { f64::NAN };
     }
     if rest.len() >= 2 && rest[0] == b'0' && (rest[1] == b'x' || rest[1] == b'X') {
-        let has_digits = match rest.get(2) {
-            Some(&c) if is_hex_digit(c) => true,
-            Some(b'.') => rest.get(3).is_some_and(|&c| is_hex_digit(c)),
-            _ => false,
-        };
-        if has_digits {
-            return sign * parse_hex_float(&rest[2..]);
-        }
-        // "0x" without hex digits falls back to parsing "0".
+        // The previous bounded mantissa lost sticky bits beyond 128 bits,
+        // and an ASCII-only separator check misses locale decimal points.
+        // The host C runtime handles exact rounding and C's valid-prefix
+        // rules.
+        return crate::platform::os_strtod(b);
     }
     // decimal: int digits [. frac digits] [eE [sign] exp digits]
     let mut j = 0;
@@ -145,81 +129,6 @@ const OS_STRTOD_BUF: usize = 64;
 /// as decimals, so it must stay ahead of `parse_double`'s own dispatch.
 fn os_strtod(b: &[u8]) -> f64 {
     parse_double(&b[..b.len().min(OS_STRTOD_BUF - 1)])
-}
-
-/// Value of a `0x` hex float body (digits past `0x`): hex digits with an
-/// optional `.` and an optional `p`/`P` signed binary exponent.
-fn parse_hex_float(b: &[u8]) -> f64 {
-    let mut j = 0;
-    let mut mantissa: u128 = 0;
-    let mut shift = 0i64;
-    let mut extra = 0i64;
-    let mut saw_digit = false;
-    loop {
-        match b.get(j) {
-            Some(&c) if is_hex_digit(c) => {
-                saw_digit = true;
-                if mantissa <= (u128::MAX >> 4) {
-                    mantissa = (mantissa << 4) | u128::from(hex_val(c));
-                } else {
-                    extra += 4;
-                }
-                j += 1;
-            }
-            Some(b'.') => {
-                j += 1;
-                while let Some(&c) = b.get(j) {
-                    if !is_hex_digit(c) {
-                        break;
-                    }
-                    saw_digit = true;
-                    if mantissa <= (u128::MAX >> 4) {
-                        mantissa = (mantissa << 4) | u128::from(hex_val(c));
-                        shift -= 4;
-                    } else {
-                        extra += 4;
-                        shift -= 4;
-                    }
-                    j += 1;
-                }
-                break;
-            }
-            _ => break,
-        }
-    }
-    if !saw_digit {
-        return 0.0;
-    }
-    let mut exp: i64 = 0;
-    if matches!(b.get(j), Some(b'p') | Some(b'P')) {
-        let mut k = j + 1;
-        let eneg = match b.get(k) {
-            Some(b'-') => {
-                k += 1;
-                true
-            }
-            Some(b'+') => {
-                k += 1;
-                false
-            }
-            _ => false,
-        };
-        let estart = k;
-        let mut e: i64 = 0;
-        while let Some(&c) = b.get(k) {
-            if !c.is_ascii_digit() {
-                break;
-            }
-            e = (e * 10 + i64::from(c - b'0')).min(1_000_000);
-            k += 1;
-        }
-        if k > estart {
-            exp = if eneg { -e } else { e };
-        }
-    }
-    // value = mantissa * 2^(shift + extra + exp); the u128 -> f64 cast
-    // rounds half-even, matching strtod's rounding of the full value.
-    (mantissa as f64) * 2f64.powi((shift + extra + exp) as i32)
 }
 
 /* --------------------------------------------------------------------- */

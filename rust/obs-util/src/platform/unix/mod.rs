@@ -2,6 +2,7 @@
 
 #[cfg(target_os = "macos")]
 pub mod cocoa;
+pub mod crt;
 pub mod event;
 pub mod nix;
 pub mod pipe;

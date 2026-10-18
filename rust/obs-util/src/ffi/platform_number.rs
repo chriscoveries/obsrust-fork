@@ -3,12 +3,13 @@
 //! The functions only convert to and from the safe core in
 //! [`crate::platform_number`].
 //!
-//! Intentional difference from C: the C functions swap `.` for the current
-//! `LC_NUMERIC` decimal point around `strtod`/`snprintf`; the Rust core reads
-//! and writes `.` directly. The results are identical for every input that
-//! uses `.`; only a string that already contains the locale's own decimal
-//! point (for example `"1,5"` under a `,` locale) reads differently: C
-//! converts it, Rust stops at the `,`.
+//! Intentional differences from C: decimal parsing in the Rust core and
+//! formatting still use `.` directly, rather than translating the active
+//! `LC_NUMERIC` decimal point as C does. Hexadecimal parsing delegates to the
+//! platform C runtime after translating its `.` separator, preserving C's
+//! rounding and locale behavior for that path. A decimal string containing
+//! the locale separator (for example `"1,5"` under a `,` locale) still reads
+//! differently: C converts it, while the Rust decimal parser stops at `,`.
 
 use core::ffi::{CStr, c_char, c_int};
 

@@ -1,6 +1,7 @@
 //! Windows side of the [platform boundary](super). [`pipe`], [`sync`] and
 //! [`utf8`] call Win32 directly, declared against kernel32.lib.
 
+pub mod crt;
 pub mod host;
 pub mod pipe;
 pub mod sync;
