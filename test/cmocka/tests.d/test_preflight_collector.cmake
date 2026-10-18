@@ -32,7 +32,7 @@ if((OS_LINUX OR OS_MACOS) AND TARGET OBS::libobs-opengl AND TARGET obs-preflight
     add_test(
       NAME test_preflight_collector
       COMMAND "${XVFB_RUN_EXECUTABLE}" -a "$<TARGET_FILE:test_preflight_collector>"
-      WORKING_DIRECTORY "$<TARGET_FILE_DIR:test_preflight_collector>"
+      WORKING_DIRECTORY "${OBS_OUTPUT_DIR}/$<CONFIG>"
     )
   else()
     add_test(
