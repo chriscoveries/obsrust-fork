@@ -81,9 +81,24 @@ impl Pipe {
         if args.args.is_empty() {
             return None;
         }
+        // C passes argv[0] to `posix_spawn` as a path, so a name without a
+        // slash names a file in the current directory. `Command` would
+        // search PATH for it instead; `./` keeps the C lookup. argv[0]
+        // itself is passed through unchanged. One difference remains for
+        // every path: `Command` spawns with `posix_spawnp`, which on macOS
+        // runs an executable without a `#!` line through /bin/sh, where C's
+        // `posix_spawn` fails with ENOEXEC.
+        let argv0 = &args.args[0];
+        let prefixed;
+        let program = if argv0.as_bytes().contains(&b'/') {
+            argv0
+        } else {
+            prefixed = c_string(&[b"./", argv0.as_bytes()].concat())?;
+            &prefixed
+        };
         spawn(
-            &args.args[0],
-            &args.args[0],
+            program,
+            argv0,
             &args.args[1..].iter().collect::<Vec<_>>(),
             Self::read_mode(type_),
         )
