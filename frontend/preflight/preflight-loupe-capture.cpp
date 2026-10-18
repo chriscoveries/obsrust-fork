@@ -11,7 +11,10 @@
 namespace {
 
 constexpr uint32_t RAW_VIDEO_FRAME_RATE_DIVISOR = 4;
-constexpr size_t MAX_QUEUED_PACKETS = 8;
+/* Keep several seconds of reordered 1080p packets for a slower software decoder,
+ * while bounding queued packet memory independently of bitrate and resolution. */
+constexpr size_t MAX_QUEUED_PACKETS = 512;
+constexpr size_t MAX_QUEUED_PACKET_BYTES = 64 * 1024 * 1024;
 constexpr size_t MAX_PACKET_BYTES = 8 * 1024 * 1024;
 constexpr uint64_t MAX_RAW_FRAME_BYTES = 64 * 1024 * 1024;
 constexpr uint32_t SOURCE_PREVIEW_MAX_DIMENSION = 640;
@@ -128,6 +131,7 @@ bool PreflightLoupeCapture::Start(obs_output_t *output_, obs_encoder_t *encoder)
 			source_crop = center_detail_crop(source_width, source_height);
 		}
 		packets.clear();
+		queued_packet_bytes = 0;
 		latest_pair.reset();
 		pairer.Reset();
 		accepting = false;
@@ -183,6 +187,7 @@ void PreflightLoupeCapture::Stop()
 			accepting = false;
 			stopping = true;
 			packets.clear();
+			queued_packet_bytes = 0;
 		}
 		condition.notify_all();
 		worker.join();
@@ -190,6 +195,7 @@ void PreflightLoupeCapture::Stop()
 	{
 		std::lock_guard lock(mutex);
 		packets.clear();
+		queued_packet_bytes = 0;
 		latest_pair.reset();
 		pairer.Reset();
 		accepting = false;
@@ -370,8 +376,12 @@ void PreflightLoupeCapture::QueueEncodedPacket(const encoder_packet &packet, con
 		stats.last_packet_timestamp_ns = copy.capture_timestamp_ns;
 		last_packet_capture_timestamp_ns = copy.capture_timestamp_ns;
 		++stats.encoded_packets;
-		if (packets.size() >= MAX_QUEUED_PACKETS) {
+		const size_t packet_bytes = copy.bytes.size();
+		if (packets.size() >= MAX_QUEUED_PACKETS ||
+		    packet_bytes > MAX_QUEUED_PACKET_BYTES - queued_packet_bytes) {
 			packets.clear();
+			queued_packet_bytes = 0;
+			++stats.packet_queue_overflows;
 			await_keyframe = true;
 		}
 		if (await_keyframe && !copy.keyframe) {
@@ -381,6 +391,9 @@ void PreflightLoupeCapture::QueueEncodedPacket(const encoder_packet &packet, con
 		const bool reset_decoder = await_keyframe;
 		await_keyframe = false;
 		packets.push_back({std::move(copy), reset_decoder});
+		queued_packet_bytes += packet_bytes;
+		stats.maximum_queued_packet_bytes =
+			std::max<uint64_t>(stats.maximum_queued_packet_bytes, queued_packet_bytes);
 	}
 	condition.notify_one();
 }
@@ -414,6 +427,7 @@ void PreflightLoupeCapture::DecodeWorker()
 				break;
 			}
 			queued = std::move(packets.front());
+			queued_packet_bytes -= queued.packet.bytes.size();
 			packets.pop_front();
 		}
 		if (queued.reset_decoder) {
@@ -433,6 +447,7 @@ void PreflightLoupeCapture::DecodeWorker()
 		if (!decoder.Decode(queued.packet, decoded_frames)) {
 			std::lock_guard lock(mutex);
 			packets.clear();
+			queued_packet_bytes = 0;
 			await_keyframe = true;
 			status = "Loupe decoder is resynchronizing at the next keyframe.";
 			continue;

@@ -439,10 +439,11 @@ bool capture_results_valid(PreflightLoupeCapture &capture, bool expect_packet_re
 	if (stats.encoded_packets < MIN_DECODED_FRAMES || stats.decoded_frames < MIN_DECODED_FRAMES ||
 	    stats.wrong_size_decoded_frames != 0 || !high_pair_rate ||
 	    !within_frame_intervals(stats.max_capture_timestamp_delta_ns, MAX_PAIR_DELTA_INTERVALS) ||
-	    (expect_packet_reorder && stats.reordered_packet_timestamps == 0)) {
+	    (expect_packet_reorder && stats.reordered_packet_timestamps == 0) || stats.packet_queue_overflows != 0) {
 		fprintf(stderr,
 			"capture assertions failed: source=%llu packets=%llu decoded=%llu paired=%llu unpaired=%llu "
-			"wrong_size=%llu reorder=%llu pair_rate=%llu%% max_delta=%llu\n",
+			"wrong_size=%llu reorder=%llu queue_overflows=%llu queue_bytes_peak=%llu pair_rate=%llu%% "
+			"max_delta=%llu\n",
 			static_cast<unsigned long long>(stats.source_frames),
 			static_cast<unsigned long long>(stats.encoded_packets),
 			static_cast<unsigned long long>(stats.decoded_frames),
@@ -450,6 +451,8 @@ bool capture_results_valid(PreflightLoupeCapture &capture, bool expect_packet_re
 			static_cast<unsigned long long>(stats.unpaired_decoded_frames),
 			static_cast<unsigned long long>(stats.wrong_size_decoded_frames),
 			static_cast<unsigned long long>(stats.reordered_packet_timestamps),
+			static_cast<unsigned long long>(stats.packet_queue_overflows),
+			static_cast<unsigned long long>(stats.maximum_queued_packet_bytes),
 			static_cast<unsigned long long>(
 				stats.decoded_frames ? stats.paired_frames * 100 / stats.decoded_frames : 0),
 			static_cast<unsigned long long>(stats.max_capture_timestamp_delta_ns));
@@ -528,6 +531,7 @@ void configure_and_run(obs_source_t **source_slot, obs_output_t *output, const c
 		fprintf(stderr,
 			"loupe capture counters: source=%llu callbacks=%llu null_packet=%llu non_video=%llu missing_time=%llu "
 			"zero_time=%llu packets=%llu decoded=%llu paired=%llu unpaired=%llu wrong_size=%llu reorders=%llu "
+			"queue_overflows=%llu queue_bytes_peak=%llu "
 			"max_delta_ns=%llu source_ts=%llu..%llu packet_ts=%llu..%llu status=%s\n",
 			static_cast<unsigned long long>(stats.source_frames),
 			static_cast<unsigned long long>(stats.packet_callback_calls),
@@ -541,6 +545,8 @@ void configure_and_run(obs_source_t **source_slot, obs_output_t *output, const c
 			static_cast<unsigned long long>(stats.unpaired_decoded_frames),
 			static_cast<unsigned long long>(stats.wrong_size_decoded_frames),
 			static_cast<unsigned long long>(stats.reordered_packet_timestamps),
+			static_cast<unsigned long long>(stats.packet_queue_overflows),
+			static_cast<unsigned long long>(stats.maximum_queued_packet_bytes),
 			static_cast<unsigned long long>(stats.max_capture_timestamp_delta_ns),
 			static_cast<unsigned long long>(stats.first_source_timestamp_ns),
 			static_cast<unsigned long long>(stats.last_source_timestamp_ns),

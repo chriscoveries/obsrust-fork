@@ -4,6 +4,7 @@
 
 #include <obs.h>
 
+#include <cstddef>
 #include <condition_variable>
 #include <cstdint>
 #include <deque>
@@ -26,6 +27,8 @@ struct PreflightLoupeCaptureStats {
 	uint64_t unpaired_decoded_frames = 0;
 	uint64_t wrong_size_decoded_frames = 0;
 	uint64_t reordered_packet_timestamps = 0;
+	uint64_t packet_queue_overflows = 0;
+	uint64_t maximum_queued_packet_bytes = 0;
 	uint64_t max_capture_timestamp_delta_ns = 0;
 	uint64_t first_source_timestamp_ns = 0;
 	uint64_t last_source_timestamp_ns = 0;
@@ -46,6 +49,7 @@ class PreflightLoupeCapture {
 	std::condition_variable condition;
 	mutable std::mutex mutex;
 	std::deque<QueuedPacket> packets;
+	size_t queued_packet_bytes = 0;
 	std::shared_ptr<const preflight::loupe::FramePair> latest_pair;
 	std::thread worker;
 	obs_output_t *output = nullptr;
