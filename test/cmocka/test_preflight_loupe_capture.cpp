@@ -29,7 +29,9 @@ constexpr uint32_t REALISTIC_WIDTH = 1920;
 constexpr uint32_t REALISTIC_HEIGHT = 1080;
 constexpr uint32_t RECONFIGURED_WIDTH = 128;
 constexpr uint32_t RECONFIGURED_HEIGHT = 96;
-constexpr uint32_t OUTPUT_DURATION_MS = 5000;
+/* The macOS virtual software renderer dropped about a third of 1080p frames;
+ * give x264 enough source time to produce 60 decoded frames past its delay. */
+constexpr uint32_t OUTPUT_DURATION_MS = 8000;
 constexpr uint32_t RECONFIGURED_DURATION_MS = 4000;
 constexpr uint64_t MIN_DECODED_FRAMES = FPS * 2;
 constexpr uint64_t MIN_PAIR_RATE_PERCENT = 95;
