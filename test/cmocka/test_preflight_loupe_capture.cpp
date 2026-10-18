@@ -29,10 +29,10 @@ constexpr uint32_t REALISTIC_WIDTH = 1920;
 constexpr uint32_t REALISTIC_HEIGHT = 1080;
 constexpr uint32_t RECONFIGURED_WIDTH = 128;
 constexpr uint32_t RECONFIGURED_HEIGHT = 96;
-/* The macOS virtual software renderer dropped about a third of 1080p frames;
- * give x264 enough source time to produce 60 decoded frames past its delay. */
-constexpr uint32_t OUTPUT_DURATION_MS = 8000;
+constexpr uint32_t OUTPUT_DURATION_MS = 5000;
 constexpr uint32_t RECONFIGURED_DURATION_MS = 4000;
+/* Keep feeding through slow virtual renderers, but cap a single capture at 3x its minimum duration. */
+constexpr uint32_t MAX_CAPTURE_DURATION_MULTIPLIER = 3;
 constexpr uint64_t MIN_DECODED_FRAMES = FPS * 2;
 constexpr uint64_t MIN_PAIR_RATE_PERCENT = 95;
 constexpr uint64_t MAX_PAIR_DELTA_INTERVALS = 2;
@@ -314,13 +314,21 @@ void emit_pattern_frame(obs_source_t *source, uint32_t width, uint32_t height)
 	obs_source_frame_destroy(frame);
 }
 
-void emit_pattern_for(obs_source_t *source, uint32_t width, uint32_t height, uint32_t duration_ms)
+bool emit_pattern_until_decoded(obs_source_t *source, uint32_t width, uint32_t height, PreflightLoupeCapture &capture,
+				uint32_t minimum_duration_ms)
 {
-	const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(duration_ms);
+	const auto start = std::chrono::steady_clock::now();
+	const auto minimum_end = start + std::chrono::milliseconds(minimum_duration_ms);
+	const auto deadline = start + std::chrono::milliseconds(minimum_duration_ms * MAX_CAPTURE_DURATION_MULTIPLIER);
 	while (std::chrono::steady_clock::now() < deadline) {
 		emit_pattern_frame(source, width, height);
+		if (std::chrono::steady_clock::now() >= minimum_end &&
+		    capture.Stats().decoded_frames >= MIN_DECODED_FRAMES) {
+			return true;
+		}
 		std::this_thread::sleep_for(std::chrono::milliseconds(1000 / FPS));
 	}
+	return capture.Stats().decoded_frames >= MIN_DECODED_FRAMES;
 }
 
 void stop_output(obs_output_t *output)
@@ -533,8 +541,8 @@ void configure_and_run(obs_source_t **source_slot, obs_output_t *output, const c
 		cleanup_generation(capture, source_slot, output, encoder_slot, weak_slot);
 		fail_msg("real encoder output did not start");
 	}
-	emit_pattern_for(source, width, height, duration_ms);
-	const bool enough_frames = wait_for_decoded_frames(capture, MIN_DECODED_FRAMES, 7000);
+	const bool enough_frames = emit_pattern_until_decoded(source, width, height, capture, duration_ms) ||
+				   wait_for_decoded_frames(capture, MIN_DECODED_FRAMES, 7000);
 	const bool results_valid = enough_frames &&
 				   capture_results_valid(capture, expect_packet_reorder, check_pattern_crop);
 	if (!results_valid) {

@@ -287,9 +287,23 @@ static void collector_samples_a_running_headless_output(void **state)
 	size_t window_count = 0;
 	int count_status = obs_preflight_engine_get_window_count(engine, &window_count);
 	struct obs_preflight_window window = {0};
-	int window_status = count_status == OBS_PREFLIGHT_OK && window_count
-				    ? obs_preflight_engine_get_window(engine, 0, &window)
-				    : OBS_PREFLIGHT_ANALYSIS_ERROR;
+	int window_status = OBS_PREFLIGHT_ANALYSIS_ERROR;
+	bool found_output_window = false;
+	/* The earliest complete bucket can contain only encoder warm-up. Find a
+	 * measured window with real output instead of assuming bucket zero has bytes. */
+	if (count_status == OBS_PREFLIGHT_OK) {
+		for (size_t i = 0; i < window_count; ++i) {
+			struct obs_preflight_window candidate = {0};
+			window_status = obs_preflight_engine_get_window(engine, i, &candidate);
+			if (window_status != OBS_PREFLIGHT_OK)
+				break;
+			if (candidate.output_bytes > 0 && candidate.output_frames > 0) {
+				window = candidate;
+				found_output_window = true;
+				break;
+			}
+		}
+	}
 	obs_preflight_collector_destroy(collector);
 	obs_preflight_engine_destroy(engine);
 
@@ -297,6 +311,7 @@ static void collector_samples_a_running_headless_output(void **state)
 	assert_true(stopped);
 	assert_int_equal(count_status, OBS_PREFLIGHT_OK);
 	assert_true(window_count >= 2);
+	assert_true(found_output_window);
 	assert_int_equal(window_status, OBS_PREFLIGHT_OK);
 	assert_true(window.duration_ms >= SAMPLE_INTERVAL_MS);
 	assert_true(window.output_bytes > 0);
