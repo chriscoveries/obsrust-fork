@@ -17,6 +17,7 @@
 
 #include "preflight-loupe-capture.hpp"
 #include "preflight-loupe-core.hpp"
+#include "preflight_graphics_test_utils.h"
 
 /* Keep cmocka last: its fail() macro collides with C++ standard headers. */
 #include <cmocka.h>
@@ -56,6 +57,7 @@ struct PatternSource {
 };
 
 bool obs_up;
+bool graphics_effects_missing;
 
 const char *pattern_name(void *)
 {
@@ -200,6 +202,7 @@ void load_module(const char *path, const char *data_path)
 int setup(void **state)
 {
 	(void)state;
+	graphics_effects_missing = false;
 #if defined(__linux__)
 	if (!getenv("DISPLAY")) {
 		fprintf(stderr, "preflight loupe capture test requires xvfb-run to provide DISPLAY\n");
@@ -211,6 +214,12 @@ int setup(void **state)
 		return -1;
 	}
 	obs_up = true;
+	if (!preflight_graphics_effects_available("preflight loupe capture test")) {
+		graphics_effects_missing = true;
+		obs_shutdown();
+		obs_up = false;
+		return 0;
+	}
 	struct obs_video_info video_info = {
 		.graphics_module = GRAPHICS_MODULE_PATH,
 		.fps_num = FPS,
@@ -560,6 +569,9 @@ void configure_and_run(obs_source_t **source_slot, obs_output_t *output, const c
 void test_real_x264_packets_reach_the_loupe_worker(void **state)
 {
 	(void)state;
+	if (graphics_effects_missing) {
+		skip();
+	}
 	PreflightLoupeCapture capture;
 	obs_output_t *output = obs_output_create(OUTPUT_ID, "preflight loupe output", nullptr, nullptr);
 	assert_non_null(output);
@@ -642,6 +654,9 @@ struct EncoderIdSearch {
 void test_registered_videotoolbox_h264_packets_reach_the_loupe_worker(void **state)
 {
 	(void)state;
+	if (graphics_effects_missing) {
+		skip();
+	}
 	std::string id;
 	for (size_t index = 0;; ++index) {
 		const char *candidate = nullptr;

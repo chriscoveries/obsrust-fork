@@ -13,6 +13,7 @@
 #include <util/threading.h>
 
 #include "obs-preflight-collector.h"
+#include "preflight_graphics_test_utils.h"
 
 #define FPS 5
 #define WINDOW_MS 500
@@ -62,6 +63,7 @@ ASSERT_OFFSET(struct obs_preflight_window, verdict, 152);
 ASSERT_OFFSET(struct obs_preflight_window, reason, 156);
 
 static bool core_ready;
+static bool graphics_effects_missing;
 
 struct test_output_context {
 	obs_output_t *output;
@@ -190,6 +192,7 @@ static struct obs_output_info test_output_info = {
 static int setup(void **state)
 {
 	UNUSED_PARAMETER(state);
+	graphics_effects_missing = false;
 #if defined(__linux__)
 	if (!getenv("DISPLAY")) {
 		fprintf(stderr, "preflight collector test requires xvfb-run to provide DISPLAY\n");
@@ -199,6 +202,11 @@ static int setup(void **state)
 	if (!obs_startup("en-US", NULL, NULL)) {
 		fprintf(stderr, "preflight collector test: obs_startup failed\n");
 		return -1;
+	}
+	if (!preflight_graphics_effects_available("preflight collector test")) {
+		graphics_effects_missing = true;
+		obs_shutdown();
+		return 0;
 	}
 
 	struct obs_video_info ovi = {
@@ -236,6 +244,8 @@ static int teardown(void **state)
 static void collector_samples_a_running_headless_output(void **state)
 {
 	UNUSED_PARAMETER(state);
+	if (graphics_effects_missing)
+		skip();
 	assert_true(core_ready);
 
 	obs_preflight_engine_t *engine = obs_preflight_engine_create_with_window(WINDOW_MS);
