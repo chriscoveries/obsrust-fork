@@ -112,10 +112,12 @@ constexpr size_t MAX_ENGINE_WINDOWS = 120;
 constexpr size_t CHART_HISTORY_SIZE = 120;
 constexpr int MAX_BAKEOFF_TABLE_VIEW_HEIGHT = 280;
 constexpr int MAX_IMPACT_TABLE_VIEW_HEIGHT = 270;
-constexpr int MIN_IMPACT_GROUP_VIEW_HEIGHT = 80;
+constexpr int MIN_IMPACT_GROUP_VIEW_HEIGHT = 160;
 constexpr int MAX_IMPACT_GROUP_VIEW_HEIGHT = MAX_IMPACT_TABLE_VIEW_HEIGHT + 40;
-// At the 720 px laptop fixture, keep Impact compact; each extra window pixel can reveal more rows.
-constexpr int IMPACT_GROUP_WINDOW_HEIGHT_OFFSET = 640;
+// Preserve the full picture and its status caption before allocating the remaining height.
+constexpr int MIN_PREVIEW_GROUP_VIEW_HEIGHT = 295;
+// At the 720 px laptop fixture, show two complete Impact rows; taller windows reveal more.
+constexpr int IMPACT_GROUP_WINDOW_HEIGHT_OFFSET = 560;
 // Reserve enough vertical room for the 4:3 encoded picture to clear the 2x render-size regression check.
 constexpr int MIN_LOUPE_VIEW_HEIGHT = 230;
 
@@ -216,7 +218,8 @@ public:
 	explicit CombinedMetricChart(QWidget *parent = nullptr) : QWidget(parent)
 	{
 		setObjectName(QStringLiteral("preflight-combined-chart"));
-		setMinimumHeight(190);
+		// Keep a small positive plot below the two-column hover readout at 1040×720.
+		setMinimumHeight(122);
 		setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
 		setMouseTracking(true);
 		setProperty("preflightStartsAtZero", true);
@@ -252,7 +255,7 @@ protected:
 		QPainter painter(this);
 		painter.setRenderHint(QPainter::Antialiasing);
 		painter.fillRect(rect(), palette().color(QPalette::Base));
-		constexpr qreal HOVER_READOUT_HEIGHT = 74.0;
+		constexpr qreal HOVER_READOUT_HEIGHT = 60.0;
 		const bool show_hover_readout = hovered_index >= 0 &&
 						hovered_index < static_cast<int>(hover_samples.size());
 		const QRectF plot =
@@ -292,6 +295,7 @@ protected:
 		const double axis_step = data_maximum <= 120.0 ? 30.0 : nice_step(data_maximum / 4.0);
 		const double maximum = data_maximum <= 120.0 ? 120.0 : std::ceil(data_maximum / axis_step) * axis_step;
 		plot_maximum = maximum;
+		const bool compact_hover_plot = show_hover_readout && plot.height() < 36.0;
 		QStringList y_axis_labels;
 		painter.setPen(palette().color(QPalette::Mid));
 		for (double value = maximum; value >= -0.001; value -= axis_step) {
@@ -299,30 +303,36 @@ protected:
 			const QString label = QString::number(qRound(value));
 			y_axis_labels.push_back(label);
 			painter.drawLine(QPointF(plot.left(), y), QPointF(plot.right(), y));
-			painter.setPen(palette().color(QPalette::Text));
-			painter.drawText(QRectF(0, y - 9, plot.left() - 8, 18), Qt::AlignRight | Qt::AlignVCenter,
-					 label);
+			if (!compact_hover_plot) {
+				painter.setPen(palette().color(QPalette::Text));
+				painter.drawText(QRectF(0, y - 9, plot.left() - 8, 18),
+						 Qt::AlignRight | Qt::AlignVCenter, label);
+			}
 			painter.setPen(palette().color(QPalette::Mid));
 		}
 		setProperty("preflightYAxisLabels", y_axis_labels);
 		setProperty("preflightYAxisMaximum", maximum);
 		setProperty("preflightYAxisTitle", QStringLiteral("% of limit"));
-		painter.save();
-		painter.translate(14, plot.center().y());
-		painter.rotate(-90);
-		painter.setPen(palette().color(QPalette::Text));
-		painter.drawText(QRectF(-plot.height() / 2.0, -10, plot.height(), 20), Qt::AlignCenter,
-				 QStringLiteral("% of limit"));
-		painter.restore();
+		if (!compact_hover_plot) {
+			painter.save();
+			painter.translate(14, plot.center().y());
+			painter.rotate(-90);
+			painter.setPen(palette().color(QPalette::Text));
+			painter.drawText(QRectF(-plot.height() / 2.0, -10, plot.height(), 20), Qt::AlignCenter,
+					 QStringLiteral("% of limit"));
+			painter.restore();
+		}
 
 		const qreal limit_y = plot.bottom() - plot.height() * (100.0 / maximum);
 		const QColor danger = theme_class_color(this, "text-danger");
 		painter.setPen(QPen(danger, 1.2, Qt::DashLine));
 		painter.drawLine(QPointF(plot.left(), limit_y), QPointF(plot.right(), limit_y));
-		QRectF limit_label(plot.right() - 52, limit_y - 19, 48, 16);
-		painter.fillRect(limit_label, palette().color(QPalette::Base));
-		painter.setPen(danger);
-		painter.drawText(limit_label, Qt::AlignRight | Qt::AlignVCenter, QStringLiteral("Limit"));
+		if (!compact_hover_plot) {
+			QRectF limit_label(plot.right() - 52, limit_y - 19, 48, 16);
+			painter.fillRect(limit_label, palette().color(QPalette::Base));
+			painter.setPen(danger);
+			painter.drawText(limit_label, Qt::AlignRight | Qt::AlignVCenter, QStringLiteral("Limit"));
+		}
 		setProperty("preflightLimitLine", true);
 		setProperty("preflightLimitLabel", QStringLiteral("Limit"));
 		setProperty("preflightLimitLineY", limit_y);
@@ -364,6 +374,7 @@ protected:
 							      std::max(1, static_cast<int>(hover_samples.size()) - 1);
 			painter.setPen(QPen(palette().color(QPalette::Text), 1, Qt::DashLine));
 			painter.drawLine(QPointF(x, plot.top()), QPointF(x, plot.bottom()));
+			const qreal marker_radius = std::min(4.0, plot.height() / 8.0);
 			for (const auto &line : series) {
 				if (static_cast<size_t>(hovered_index) >= line.points.size() ||
 				    !line.points[static_cast<size_t>(hovered_index)]) {
@@ -374,10 +385,11 @@ protected:
 					plot.height() * (*line.points[static_cast<size_t>(hovered_index)] / maximum);
 				painter.setPen(QPen(palette().color(QPalette::Base), 1.5));
 				painter.setBrush(line.color);
-				painter.drawEllipse(QPointF(x, y), 4.0, 4.0);
+				painter.drawEllipse(QPointF(x, y), marker_radius, marker_radius);
 			}
 			QFont readout_font = font();
-			readout_font.setPointSizeF(std::max(7.5, readout_font.pointSizeF() - 2.0));
+			// Compact detail preserves a visible plot beneath the hover readout at laptop height.
+			readout_font.setPointSizeF(5.5);
 			const QFontMetrics metrics(readout_font);
 			painter.setFont(readout_font);
 			painter.setPen(palette().color(QPalette::Text));
@@ -387,7 +399,7 @@ protected:
 			const qreal right_column = width() / 2.0 + 4;
 			const qreal row_top = metrics.height() + 5;
 			const qreal row_step = (HOVER_READOUT_HEIGHT - row_top - 1) / 4.0;
-			bool hover_lines_fit = true;
+			bool hover_lines_fit = row_step >= metrics.height();
 			for (size_t index = 0; index < sample.lines.size(); ++index) {
 				const qreal column = (index % 2) == 0 ? left_column : right_column;
 				const qreal y = row_top + row_step * static_cast<qreal>(index / 2);
@@ -2782,8 +2794,10 @@ struct PreflightBenchWindow::Impl : preflight::bench::DataApi {
 		auto *right_side = new QWidget(one_screen);
 		right_side->setObjectName(QStringLiteral("preflight-right-side"));
 		auto *right_layout = new QVBoxLayout(right_side);
-		right_layout->setContentsMargins(8, 4, 4, 4);
-		right_layout->setSpacing(4);
+		// The preview and two-row Impact panel have fixed minimums; use their
+		// own frames for separation so the chart stays between them at 720 px.
+		right_layout->setContentsMargins(8, 0, 4, 0);
+		right_layout->setSpacing(0);
 		one_screen->addWidget(right_side);
 		one_screen->setStretchFactor(0, 0);
 		one_screen->setStretchFactor(1, 1);
@@ -2918,12 +2932,17 @@ struct PreflightBenchWindow::Impl : preflight::bench::DataApi {
 		auto *preview_layout = new QVBoxLayout(preview_group);
 		preview_layout->setContentsMargins(3, 3, 3, 3);
 		loupe_status_label = new QLabel(QObject::tr("Waiting"), preview_group);
+		loupe_status_label->setObjectName(QStringLiteral("preflight-loupe-status"));
 		loupe_status_label->setWordWrap(true);
+		loupe_status_label->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
+		loupe_status_label->setMinimumHeight(loupe_status_label->fontMetrics().height());
+		setClasses(loupe_status_label, "text-muted");
 		loupe_view = new LoupeView(preview_group);
 		loupe_view->setObjectName(QStringLiteral("preflight-loupe-view"));
 		loupe_view->setMaximumHeight(450);
-		preview_layout->addWidget(loupe_view, 1);
 		preview_layout->addWidget(loupe_status_label);
+		preview_layout->addWidget(loupe_view, 1);
+		preview_group->setMinimumHeight(MIN_PREVIEW_GROUP_VIEW_HEIGHT);
 		right_layout->insertWidget(0, preview_group, 2);
 		impact_group = new QGroupBox(QObject::tr("Impact"), right_side);
 		impact_group->setObjectName(QStringLiteral("preflight-impact-group"));
@@ -2962,6 +2981,7 @@ struct PreflightBenchWindow::Impl : preflight::bench::DataApi {
 		impact_table->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
 		impact_layout->addWidget(impact_table);
 		impact_group->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+		impact_group->setMinimumHeight(MIN_IMPACT_GROUP_VIEW_HEIGHT);
 		impact_group->setMaximumHeight(MIN_IMPACT_GROUP_VIEW_HEIGHT);
 		right_layout->addWidget(impact_group);
 		// Preserve the full preview first, then give the chart the remaining height.
