@@ -1,7 +1,7 @@
 //! CEA-608 roll-up (RU2/RU3) `cc_data` pair emitter.
 //!
 //! Mirrors the proven control sequence and frame pacing of the
-//! `spikes/2026-10-12/rollup/rollup.c` harness, which FFmpeg's `subcc`
+//! original C spike harness, whose output FFmpeg's `subcc`
 //! decoder recovered from real H.264 streams at 30 and 60 fps:
 //!
 //! - init: EDM, RU2/RU3, and a bottom-row PAC — each repeated twice
