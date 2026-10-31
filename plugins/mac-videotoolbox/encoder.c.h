@@ -751,16 +751,41 @@ static bool update_params(struct vt_encoder *enc, obs_data_t *settings)
     return true;
 }
 
+/* Private encoder settings that a live update can change. */
+struct vt_rate_state {
+    uint32_t bitrate;
+    bool limit_bitrate;
+    uint32_t max_bitrate;
+    double max_bitrate_window;
+    float quality;
+};
+
+static bool vt_rate_state_changed(const struct vt_rate_state *old, const struct vt_rate_state *current)
+{
+    return old->bitrate != current->bitrate || old->limit_bitrate != current->limit_bitrate;
+}
+
 static bool vt_update(void *data, obs_data_t *settings)
 {
     struct vt_encoder *enc = data;
-
-    uint32_t old_bitrate = enc->bitrate;
-    bool old_limit_bitrate = enc->limit_bitrate;
+    const struct vt_rate_state previous = {
+        .bitrate = enc->bitrate,
+        .limit_bitrate = enc->limit_bitrate,
+        .max_bitrate = enc->rc_max_bitrate,
+        .max_bitrate_window = enc->rc_max_bitrate_window,
+        .quality = enc->quality,
+    };
 
     update_params(enc, settings);
 
-    if (old_bitrate == enc->bitrate && old_limit_bitrate == enc->limit_bitrate)
+    const struct vt_rate_state current = {
+        .bitrate = enc->bitrate,
+        .limit_bitrate = enc->limit_bitrate,
+        .max_bitrate = enc->rc_max_bitrate,
+        .max_bitrate_window = enc->rc_max_bitrate_window,
+        .quality = enc->quality,
+    };
+    if (!vt_rate_state_changed(&previous, &current))
         return true;
 
     OSStatus code = session_set_bitrate(enc->session, enc->rate_control, enc->bitrate, enc->quality, enc->limit_bitrate,
