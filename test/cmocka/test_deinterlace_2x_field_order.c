@@ -36,7 +36,9 @@
  * upload), and the graphics thread stood still for about 0.4 s while the
  * source's frames kept coming: they were overdue when it went on, and the
  * buffered walk dropped them (fields 2-23 of 72 never shown). The case holds
- * the graphics thread that long on the source's first frame, on purpose.
+ * the graphics thread that long on the source's first frame, on purpose. It
+ * is a warm-up frame, and the canvas outputs nothing while the thread is
+ * held, so the warm-up waits until it is through.
  *
  * Needs core video, so it runs under xvfb-run and skips without a display.
  */
@@ -265,7 +267,10 @@ static void play(obs_source_t *source, bool top_first, uint32_t fps)
 }
 
 /* Pushes WARMUP_FRAMES unrecognisable (black) frames at fps, then waits until
- * the canvas has rendered WARMUP_TICKS more frames (at most 2 s). */
+ * the canvas has rendered WARMUP_TICKS more frames (at most 2 s). The source
+ * takes its first frame at the next tick, so a cold render path there holds
+ * the graphics thread, and the canvas, before it has rendered that many: the
+ * wait ends after it (the cold_start case, #456). */
 static void warm_up(obs_source_t *source, uint32_t fps, struct watch *w)
 {
 	static uint8_t black[W * H * 4];
@@ -360,7 +365,6 @@ enum start {
 	START_WARM,  /* the source's own warm-up frames, then at once */
 	START_NEW,   /* nothing: a source that never showed a frame */
 	START_PAUSE, /* the source's own warm-up frames, then a pause */
-	START_NONE,  /* nothing: the source's first frame is measured (before the warm-up, #456) */
 };
 
 struct rates {
@@ -441,8 +445,6 @@ static void check_field_order(enum obs_deinterlace_mode mode, bool top_first, bo
 		obs_source_release(warm);
 		obs_scene_add(scene, source);
 		os_sleep_ms(PAUSE_MS);
-	} else if (start == START_NONE) {
-		obs_scene_add(scene, source);
 	} else {
 		obs_scene_add(scene, source);
 		warm_up(source, r->source_fps, &w);
@@ -487,13 +489,12 @@ static void check_field_order(enum obs_deinterlace_mode mode, bool top_first, bo
 	 * frames (fields 0-3) after the warm-up: its last frame and the first
 	 * measured one are stamped back to back, so the first has no frame
 	 * duration to time its fields by (and Yadif needs a previous frame).
-	 * The same goes for the first two frames of a source measured from its
-	 * first frame. After a pause or for a new source, count every field
-	 * from field 0, the first one shown included (#1965); only a buffered
-	 * new source's first frame may be held longer than the cadence, as the
-	 * buffered clock starts from it. Also count how many output frames each
-	 * field is held for (the last one is held until the case ends). */
-	const int startup = start == START_WARM || start == START_NONE ? STARTUP_FIELDS : 0;
+	 * After a pause or for a new source, count every field from field 0,
+	 * the first one shown included (#1965); only a buffered new source's
+	 * first frame may be held longer than the cadence, as the buffered
+	 * clock starts from it. Also count how many output frames each field
+	 * is held for (the last one is held until the case ends). */
+	const int startup = start == START_WARM ? STARTUP_FIELDS : 0;
 	const int unheld = start == START_NEW && !unbuffered ? 2 : startup;
 	int shown[MAX_SEEN];
 	size_t num = 0, unknown = 0, backwards = 0, skipped = 0, max_gap = 0, held = 0, max_held = 0;
@@ -805,10 +806,10 @@ static void run_case(void **state)
 				      START_PAUSE}}
 
 /* A cold render path on the source's first frame (#456), in the case it was
- * seen in: Yadif 2x, top field first, buffered. */
+ * seen in: Yadif 2x, top field first, buffered, with its own warm-up. */
 #define COLD_START_CASES(rate_name, source_fps, canvas_fps) \
 	{"cold_start_yadif_2x_" #rate_name, run_case, NULL, NULL, \
-	 &(struct field_case){OBS_DEINTERLACE_MODE_YADIF_2X, true, false, {source_fps, canvas_fps}, START_NONE, true}}
+	 &(struct field_case){OBS_DEINTERLACE_MODE_YADIF_2X, true, false, {source_fps, canvas_fps}, START_WARM, true}}
 
 #define FIELD_CASES(rate_name, source_fps, canvas_fps)                                                                         \
 	FIELD_CASE(yadif_2x_top_first_##rate_name, OBS_DEINTERLACE_MODE_YADIF_2X, true, source_fps, canvas_fps),               \
