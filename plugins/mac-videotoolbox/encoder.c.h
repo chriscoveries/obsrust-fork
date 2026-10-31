@@ -30,6 +30,11 @@ static DARRAY(struct vt_prores_encoder_data) vt_prores_software_encoder_list;
 struct vt_frame_source_ref;
 struct vt_callback_context;
 
+struct vt_texture_pixel_buffer {
+	IOSurfaceRef surface;
+	CVPixelBufferRef pixel_buffer;
+};
+
 enum vt_frame_source_type {
 	VT_FRAME_SOURCE_RAW,
 	VT_FRAME_SOURCE_TEXTURE,
@@ -73,6 +78,7 @@ struct vt_encoder {
 	pthread_mutex_t texture_mutex;
 	pthread_cond_t texture_cond;
 	struct vt_frame_source_ref *frame_sources;
+	DARRAY(struct vt_texture_pixel_buffer) texture_pixel_buffers;
 	uint32_t pending_frame_submissions;
 	struct vt_callback_context *callback_context;
 	bool texture_fallback_logged;
@@ -374,6 +380,16 @@ static void vt_clear_frame_source_tombstones(struct vt_encoder *enc)
 		vt_unref_texture_source(sources);
 		sources = next;
 	}
+}
+
+static void vt_clear_texture_pixel_buffer_cache(struct vt_encoder *enc)
+{
+	for (size_t i = 0; i < enc->texture_pixel_buffers.num; i++) {
+		CVPixelBufferRef pixel_buffer = enc->texture_pixel_buffers.array[i].pixel_buffer;
+		if (pixel_buffer)
+			CFRelease(pixel_buffer);
+	}
+	da_free(enc->texture_pixel_buffers);
 }
 
 static const char *codec_type_to_print_fmt(CMVideoCodecType codec_type)
@@ -967,6 +983,7 @@ static void vt_destroy(void *data)
 			vt_invalidate_session(enc);
 		if (enc->texture_sync_initialized)
 			vt_clear_frame_source_tombstones(enc);
+		vt_clear_texture_pixel_buffer_cache(enc);
 		if (enc->queue)
 			CFRelease(enc->queue);
 		if (enc->texture_sync_initialized) {
@@ -1831,6 +1848,36 @@ static CVReturn vt_create_pixel_buffer_with_surface(struct vt_encoder *enc, IOSu
 	return CVPixelBufferCreateWithIOSurface(kCFAllocatorDefault, surface, NULL, pixbuf);
 }
 
+static bool vt_get_texture_pixel_buffer(struct vt_encoder *enc, IOSurfaceRef surface, CVPixelBufferRef *pixbuf)
+{
+	for (size_t i = 0; i < enc->texture_pixel_buffers.num; i++) {
+		struct vt_texture_pixel_buffer *cached = &enc->texture_pixel_buffers.array[i];
+		if (cached->surface != surface)
+			continue;
+
+		CFRetain(cached->pixel_buffer);
+		*pixbuf = cached->pixel_buffer;
+		return true;
+	}
+
+	CVPixelBufferRef created = NULL;
+	CVReturn code = vt_create_pixel_buffer_with_surface(enc, surface, &created);
+	if (code != kCVReturnSuccess || !created) {
+		if (created)
+			CFRelease(created);
+		return false;
+	}
+
+	struct vt_texture_pixel_buffer cached = {
+		.surface = surface,
+		.pixel_buffer = created,
+	};
+	da_push_back(enc->texture_pixel_buffers, &cached);
+	CFRetain(created);
+	*pixbuf = created;
+	return true;
+}
+
 static bool vt_encode_texture(void *data, struct encoder_texture *texture, int64_t pts, uint64_t lock_key,
 			      uint64_t *next_key, struct encoder_packet *packet, bool *received_packet)
 {
@@ -1855,10 +1902,7 @@ static bool vt_encode_texture(void *data, struct encoder_texture *texture, int64
 	}
 
 	CVPixelBufferRef pixbuf = NULL;
-	CVReturn code = vt_create_pixel_buffer_with_surface(enc, (IOSurfaceRef)texture->iosurface, &pixbuf);
-	if (code != kCVReturnSuccess || !pixbuf) {
-		if (pixbuf)
-			CFRelease(pixbuf);
+	if (!vt_get_texture_pixel_buffer(enc, (IOSurfaceRef)texture->iosurface, &pixbuf)) {
 		return vt_encode_texture_raw_fallback(enc, NULL, (IOSurfaceRef)texture->iosurface, pts, packet,
 						      received_packet);
 	}
@@ -1902,7 +1946,7 @@ static bool vt_encode_texture(void *data, struct encoder_texture *texture, int64
 	vt_track_frame_source(enc, source_ref);
 
 	CMTime frame_pts = CMTimeMake(pts, enc->fps_num);
-	code = VTCompressionSessionEncodeFrame(enc->session, pixbuf, frame_pts, dur, NULL, source_ref, NULL);
+	OSStatus code = VTCompressionSessionEncodeFrame(enc->session, pixbuf, frame_pts, dur, NULL, source_ref, NULL);
 	if (code != noErr) {
 		if (!vt_take_frame_source(enc, source_ref, &source_ref)) {
 			vt_encode_submission_cancel();
