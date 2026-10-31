@@ -29,3 +29,4 @@
 /* vt-frame-copy.c */
 #include <stdatomic.h>
 #include <string.h>
+#include <sys/resource.h>

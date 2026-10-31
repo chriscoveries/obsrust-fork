@@ -5,9 +5,15 @@
  * VideoToolbox accepts N submissions, then prints the profiler
  * `download_frame` count and counted source-plane copy bytes.
  *
- * Usage: zero-copy-harness [frames=120] [--raw-fallback|--raw-no-gpu]
+ * Usage: zero-copy-harness [frames=120] [--warmup=N] [--raw-fallback|--raw-no-gpu]
  * `--raw-fallback` keeps GPU conversion enabled but forces the encoder's raw
  * input route. `--raw-no-gpu` exercises legacy CPU input (`--raw` alias).
+ *
+ * Timing (#755): the first N accepted submissions (default frames / 5) are
+ * warm-up. Over the rest, the plugin reads process user + system CPU time at
+ * submission N and at the last one, and records each later frame's latency
+ * from entering the encode callback, and from the VideoToolbox submit, to
+ * the VideoToolbox output callback. A second `timing` line prints them.
  *
  * This is a CLI measurement tool, not a cmocka unit test: it needs a full
  * build tree (graphics + encoder + output modules) and real GPU/VideoToolbox.
@@ -44,6 +50,22 @@ static uint64_t (*vt_copy_bytes_total_fn)(void) = NULL;
 static void (*vt_encode_submission_reset_fn)(uint64_t) = NULL;
 static uint64_t (*vt_encode_submission_total_fn)(void) = NULL;
 static void (*vt_test_force_raw_fn)(bool) = NULL;
+static void (*vt_encode_timing_reset_fn)(uint64_t) = NULL;
+static size_t (*vt_encode_timing_samples_fn)(uint64_t *, uint64_t *, size_t) = NULL;
+static bool (*vt_encode_cpu_window_fn)(uint64_t *, uint64_t *, uint64_t *, uint64_t *) = NULL;
+
+static bool resolve_symbol(const char *name, void *function_pointer, size_t size)
+{
+	(void)dlerror();
+	void *symbol = dlsym(vt_plugin_handle, name);
+	const char *error = dlerror();
+	if (error || !symbol || sizeof(symbol) != size) {
+		fprintf(stderr, "harness: cannot resolve %s: %s\n", name, error ? error : "missing symbol");
+		return false;
+	}
+	memcpy(function_pointer, &symbol, size);
+	return true;
+}
 
 static bool resolve_copy_counter(void)
 {
@@ -103,7 +125,39 @@ static bool resolve_copy_counter(void)
 		return false;
 	}
 	memcpy(&vt_test_force_raw_fn, &force_raw_symbol, sizeof(vt_test_force_raw_fn));
-	return true;
+	return resolve_symbol("vt_encode_timing_reset", &vt_encode_timing_reset_fn,
+			      sizeof(vt_encode_timing_reset_fn)) &&
+	       resolve_symbol("vt_encode_timing_samples", &vt_encode_timing_samples_fn,
+			      sizeof(vt_encode_timing_samples_fn)) &&
+	       resolve_symbol("vt_encode_cpu_window", &vt_encode_cpu_window_fn, sizeof(vt_encode_cpu_window_fn));
+}
+
+static int compare_u64(const void *a, const void *b)
+{
+	uint64_t x = *(const uint64_t *)a;
+	uint64_t y = *(const uint64_t *)b;
+	return x < y ? -1 : x > y;
+}
+
+/* Nearest-rank percentile of a sorted array, in microseconds. */
+static double percentile_us(const uint64_t *sorted, size_t count, double percent)
+{
+	if (!count)
+		return 0.0;
+	size_t rank = (size_t)(percent / 100.0 * (double)count + 0.999999);
+	if (rank < 1)
+		rank = 1;
+	if (rank > count)
+		rank = count;
+	return (double)sorted[rank - 1] / 1000.0;
+}
+
+static void print_latency(const char *name, uint64_t *values, size_t count)
+{
+	qsort(values, count, sizeof(*values), compare_u64);
+	printf(" %s_p50_us=%.1f %s_p95_us=%.1f %s_min_us=%.1f %s_max_us=%.1f", name, percentile_us(values, count, 50),
+	       name, percentile_us(values, count, 95), name, count ? (double)values[0] / 1000.0 : 0.0, name,
+	       count ? (double)values[count - 1] / 1000.0 : 0.0);
 }
 
 static uint64_t read_copy_bytes(void)
@@ -232,8 +286,16 @@ int main(int argc, char **argv)
 	bool force_raw_fallback = false;
 	bool raw_no_gpu = false;
 	int want_frames = DEFAULT_FRAMES;
+	long warmup = -1;
 	for (int i = 1; i < argc; i++) {
-		if (strcmp(argv[i], "--raw-fallback") == 0) {
+		if (strncmp(argv[i], "--warmup=", 9) == 0) {
+			char *end = NULL;
+			warmup = strtol(argv[i] + 9, &end, 10);
+			if (!argv[i][9] || !end || *end || warmup <= 0) {
+				fprintf(stderr, "harness: --warmup needs a positive frame count\n");
+				return 1;
+			}
+		} else if (strcmp(argv[i], "--raw-fallback") == 0) {
 			force_raw_fallback = true;
 		} else if (strcmp(argv[i], "--raw-no-gpu") == 0 || strcmp(argv[i], "--raw") == 0) {
 			raw_no_gpu = true;
@@ -241,12 +303,18 @@ int main(int argc, char **argv)
 			char *end = NULL;
 			long parsed = strtol(argv[i], &end, 10);
 			if (!argv[i][0] || !end || *end || parsed <= 0 || parsed > INT32_MAX) {
-				fprintf(stderr, "usage: %s [frames=%d] [--raw-fallback|--raw-no-gpu]\n", argv[0],
-					DEFAULT_FRAMES);
+				fprintf(stderr, "usage: %s [frames=%d] [--warmup=N] [--raw-fallback|--raw-no-gpu]\n",
+					argv[0], DEFAULT_FRAMES);
 				return 1;
 			}
 			want_frames = (int)parsed;
 		}
+	}
+	if (warmup < 0)
+		warmup = want_frames / 5 > 0 ? want_frames / 5 : 1;
+	if (warmup >= want_frames) {
+		fprintf(stderr, "harness: --warmup must be below the frame count\n");
+		return 1;
 	}
 	if (force_raw_fallback && raw_no_gpu) {
 		fprintf(stderr, "harness: choose one raw mode\n");
@@ -355,6 +423,7 @@ int main(int argc, char **argv)
 	}
 	vt_copy_bytes_reset_fn();
 	vt_encode_submission_reset_fn((uint64_t)want_frames);
+	vt_encode_timing_reset_fn((uint64_t)warmup);
 	const int frames_before = obs_output_get_total_frames(output);
 	const uint64_t waits_before = snapshot_download_waits();
 	if (!obs_output_start(output)) {
@@ -384,6 +453,31 @@ int main(int argc, char **argv)
 	       raw_no_gpu ? "false" : "true", path, (unsigned long long)submissions, frames,
 	       (unsigned long long)copied_bytes, (unsigned long long)bytes_per_submission,
 	       (unsigned long long)bytes_remainder, (unsigned long long)waits);
+
+	uint64_t cpu_frames = 0, cpu_wall_ns = 0, cpu_user_ns = 0, cpu_system_ns = 0;
+	bool cpu_window = vt_encode_cpu_window_fn(&cpu_frames, &cpu_wall_ns, &cpu_user_ns, &cpu_system_ns);
+	uint64_t *entry_latency = calloc((size_t)want_frames, sizeof(uint64_t));
+	uint64_t *submit_latency = calloc((size_t)want_frames, sizeof(uint64_t));
+	size_t latency_count = 0;
+	if (entry_latency && submit_latency)
+		latency_count = vt_encode_timing_samples_fn(entry_latency, submit_latency, (size_t)want_frames);
+	size_t skipped = latency_count < (size_t)warmup ? latency_count : (size_t)warmup;
+	size_t measured = latency_count - skipped;
+	printf("timing path=%s warmup=%ld cpu_window=%s cpu_frames=%llu cpu_wall_ms=%.3f cpu_user_ms=%.3f "
+	       "cpu_system_ms=%.3f cpu_us_per_frame=%.2f cpu_percent=%.2f latency_samples=%zu",
+	       path, warmup, cpu_window ? "true" : "false", (unsigned long long)cpu_frames, (double)cpu_wall_ns / 1e6,
+	       (double)cpu_user_ns / 1e6, (double)cpu_system_ns / 1e6,
+	       cpu_frames ? (double)(cpu_user_ns + cpu_system_ns) / 1000.0 / (double)cpu_frames : 0.0,
+	       cpu_wall_ns ? 100.0 * (double)(cpu_user_ns + cpu_system_ns) / (double)cpu_wall_ns : 0.0, measured);
+	if (entry_latency && submit_latency) {
+		print_latency("entry_to_output", entry_latency + skipped, measured);
+		print_latency("submit_to_output", submit_latency + skipped, measured);
+	}
+	printf("\n");
+	fflush(stdout);
+	free(entry_latency);
+	free(submit_latency);
+
 	obs_output_release(output);
 	obs_encoder_release(encoder);
 	if (audio_encoder)
@@ -395,6 +489,10 @@ int main(int argc, char **argv)
 	obs_shutdown();
 	dlclose(vt_plugin_handle);
 
+	if (!cpu_window || cpu_frames != (uint64_t)(want_frames - warmup)) {
+		fprintf(stderr, "harness: CPU window did not cover submissions %ld to %d\n", warmup, want_frames);
+		return 1;
+	}
 	if (submissions != (uint64_t)want_frames) {
 		fprintf(stderr, "harness: expected %d accepted VideoToolbox submissions, got %llu\n", want_frames,
 			(unsigned long long)submissions);

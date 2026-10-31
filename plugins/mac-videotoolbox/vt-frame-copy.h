@@ -41,6 +41,19 @@ EXPORT void vt_encode_submission_cancel(void);
 EXPORT void vt_test_force_raw(bool force_raw);
 EXPORT bool vt_test_raw_forced(void);
 
+/* Harness timing. vt_encode_timing_reset() clears the samples and sets the
+ * accepted submission at which the CPU window opens; it closes at the
+ * submission limit. Each accepted frame's output callback records two
+ * latencies: from entering the encode callback (vt_encode or
+ * vt_encode_texture) and from the VideoToolbox submit, both to the output
+ * callback. The window reads process user and system time
+ * (getrusage(RUSAGE_SELF)) on the encode thread at its two submissions. */
+EXPORT void vt_encode_timing_reset(uint64_t window_start);
+EXPORT uint64_t vt_encode_timing_now(void);
+EXPORT void vt_encode_timing_record(uint64_t entered_ns, uint64_t submitted_ns);
+EXPORT size_t vt_encode_timing_samples(uint64_t *entry_to_output_ns, uint64_t *submit_to_output_ns, size_t capacity);
+EXPORT bool vt_encode_cpu_window(uint64_t *frames, uint64_t *wall_ns, uint64_t *user_ns, uint64_t *system_ns);
+
 #ifdef __cplusplus
 }
 #endif

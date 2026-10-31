@@ -8,6 +8,21 @@ static _Atomic bool force_raw_for_test = false;
 static _Thread_local uint64_t pending_submission_copy_bytes;
 static _Thread_local bool submission_in_progress;
 
+#define VT_TIMING_CAPACITY 16384
+
+struct vt_cpu_mark {
+	uint64_t wall_ns;
+	uint64_t user_ns;
+	uint64_t system_ns;
+};
+
+static uint64_t timing_entry_to_output_ns[VT_TIMING_CAPACITY];
+static uint64_t timing_submit_to_output_ns[VT_TIMING_CAPACITY];
+static _Atomic uint64_t timing_samples = 0;
+static _Atomic uint64_t timing_window_start = 0;
+static struct vt_cpu_mark cpu_window_marks[2];
+static _Atomic bool cpu_window_marked[2];
+
 void vt_copy_bytes_reset(void)
 {
 	atomic_store(&total_bytes_copied, 0);
@@ -49,6 +64,22 @@ bool vt_encode_submission_reserve(void)
 	}
 }
 
+static uint64_t vt_timeval_ns(struct timeval value)
+{
+	return (uint64_t)value.tv_sec * 1000000000ULL + (uint64_t)value.tv_usec * 1000ULL;
+}
+
+static void vt_cpu_mark_take(int index)
+{
+	struct rusage usage;
+	if (getrusage(RUSAGE_SELF, &usage) != 0)
+		return;
+	cpu_window_marks[index].wall_ns = os_gettime_ns();
+	cpu_window_marks[index].user_ns = vt_timeval_ns(usage.ru_utime);
+	cpu_window_marks[index].system_ns = vt_timeval_ns(usage.ru_stime);
+	atomic_store(&cpu_window_marked[index], true);
+}
+
 void vt_encode_submission_commit(void)
 {
 	if (!submission_in_progress)
@@ -57,7 +88,11 @@ void vt_encode_submission_commit(void)
 		atomic_fetch_add(&total_bytes_copied, pending_submission_copy_bytes);
 	pending_submission_copy_bytes = 0;
 	submission_in_progress = false;
-	atomic_fetch_add(&total_submissions, 1);
+	uint64_t accepted = atomic_fetch_add(&total_submissions, 1) + 1;
+	if (accepted == atomic_load(&timing_window_start))
+		vt_cpu_mark_take(0);
+	if (accepted == atomic_load(&submission_limit))
+		vt_cpu_mark_take(1);
 }
 
 void vt_encode_submission_cancel(void)
@@ -67,6 +102,51 @@ void vt_encode_submission_cancel(void)
 	pending_submission_copy_bytes = 0;
 	submission_in_progress = false;
 	atomic_fetch_sub(&used_submission_slots, 1);
+}
+
+void vt_encode_timing_reset(uint64_t window_start)
+{
+	atomic_store(&timing_samples, 0);
+	atomic_store(&timing_window_start, window_start);
+	atomic_store(&cpu_window_marked[0], false);
+	atomic_store(&cpu_window_marked[1], false);
+}
+
+uint64_t vt_encode_timing_now(void)
+{
+	return os_gettime_ns();
+}
+
+void vt_encode_timing_record(uint64_t entered_ns, uint64_t submitted_ns)
+{
+	uint64_t now = os_gettime_ns();
+	uint64_t index = atomic_fetch_add(&timing_samples, 1);
+	if (index >= VT_TIMING_CAPACITY)
+		return;
+	timing_entry_to_output_ns[index] = now - entered_ns;
+	timing_submit_to_output_ns[index] = now - submitted_ns;
+}
+
+size_t vt_encode_timing_samples(uint64_t *entry_to_output_ns, uint64_t *submit_to_output_ns, size_t capacity)
+{
+	uint64_t recorded = atomic_load(&timing_samples);
+	size_t count = recorded < VT_TIMING_CAPACITY ? (size_t)recorded : VT_TIMING_CAPACITY;
+	if (count > capacity)
+		count = capacity;
+	memcpy(entry_to_output_ns, timing_entry_to_output_ns, count * sizeof(*entry_to_output_ns));
+	memcpy(submit_to_output_ns, timing_submit_to_output_ns, count * sizeof(*submit_to_output_ns));
+	return count;
+}
+
+bool vt_encode_cpu_window(uint64_t *frames, uint64_t *wall_ns, uint64_t *user_ns, uint64_t *system_ns)
+{
+	if (!atomic_load(&cpu_window_marked[0]) || !atomic_load(&cpu_window_marked[1]))
+		return false;
+	*frames = atomic_load(&submission_limit) - atomic_load(&timing_window_start);
+	*wall_ns = cpu_window_marks[1].wall_ns - cpu_window_marks[0].wall_ns;
+	*user_ns = cpu_window_marks[1].user_ns - cpu_window_marks[0].user_ns;
+	*system_ns = cpu_window_marks[1].system_ns - cpu_window_marks[0].system_ns;
+	return true;
 }
 
 void vt_test_force_raw(bool force_raw)
@@ -105,3 +185,6 @@ size_t vt_copy_frame_to_pixbuf(CVPixelBufferRef pixbuf, uint8_t *data[MAX_AV_PLA
 		atomic_fetch_add(&total_bytes_copied, copied);
 	return copied;
 }
+
+/* File-local macros (BUILD.md): out of the next file in the unity group. */
+#undef VT_TIMING_CAPACITY

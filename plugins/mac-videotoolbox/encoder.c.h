@@ -102,6 +102,8 @@ struct vt_frame_source_ref {
 	bool release_started;
 	bool release_completed;
 	bool pending_released;
+	uint64_t entered_ns;
+	uint64_t submitted_ns;
 };
 
 struct vt_callback_context {
@@ -741,6 +743,8 @@ void sample_encoded_callback(void *data, void *source, OSStatus status, VTEncode
 
 	if (frame_source) {
 		assert(source_ref->type == VT_FRAME_SOURCE_RAW || source_ref->type == VT_FRAME_SOURCE_TEXTURE);
+		if (status == noErr && buffer != NULL)
+			vt_encode_timing_record(source_ref->entered_ns, source_ref->submitted_ns);
 		vt_release_texture_source_resources(source_ref);
 		vt_finish_texture_source(source_ref);
 	} else if (source)
@@ -1481,7 +1485,8 @@ static bool vt_get_cached_pixel_buffer(struct vt_encoder *enc, CVPixelBufferRef 
 	return get_cached_pixel_buffer(enc, pixbuf);
 }
 
-static OSStatus vt_submit_raw_pixel_buffer(struct vt_encoder *enc, CVPixelBufferRef pixbuf, CMTime pts, CMTime duration)
+static OSStatus vt_submit_raw_pixel_buffer(struct vt_encoder *enc, CVPixelBufferRef pixbuf, CMTime pts, CMTime duration,
+					   uint64_t entered_ns)
 {
 	struct vt_frame_source_ref *source_ref = bzalloc(sizeof(*source_ref));
 	if (!source_ref) {
@@ -1492,6 +1497,8 @@ static OSStatus vt_submit_raw_pixel_buffer(struct vt_encoder *enc, CVPixelBuffer
 	source_ref->pixel_buffer = pixbuf;
 	source_ref->type = VT_FRAME_SOURCE_RAW;
 	source_ref->references = 1;
+	source_ref->entered_ns = entered_ns;
+	source_ref->submitted_ns = vt_encode_timing_now();
 	vt_track_frame_source(enc, source_ref);
 
 	OSStatus code;
@@ -1518,6 +1525,7 @@ static bool vt_encode(void *data, struct encoder_frame *frame, struct encoder_pa
 		return false;
 	if (!vt_encode_submission_reserve())
 		return true;
+	uint64_t entered_ns = vt_encode_timing_now();
 
 	OSStatus code;
 
@@ -1544,7 +1552,7 @@ static bool vt_encode(void *data, struct encoder_frame *frame, struct encoder_pa
 		goto fail;
 	}
 
-	code = vt_submit_raw_pixel_buffer(enc, pixbuf, pts, dur);
+	code = vt_submit_raw_pixel_buffer(enc, pixbuf, pts, dur, entered_ns);
 	pixbuf = NULL;
 	if (code != noErr) {
 		vt_encode_submission_cancel();
@@ -1746,7 +1754,7 @@ static bool vt_encode_texture_raw_fallback(struct vt_encoder *enc, CVPixelBuffer
 	CMTime dur = CMTimeMake(enc->fps_den, enc->fps_num);
 	CMTime off = CMTimeMultiply(dur, 2);
 	CMTime frame_pts = CMTimeMake(pts, enc->fps_num);
-	code = vt_submit_raw_pixel_buffer(enc, pixbuf, frame_pts, dur);
+	code = vt_submit_raw_pixel_buffer(enc, pixbuf, frame_pts, dur, vt_encode_timing_now());
 	if (code != noErr) {
 		log_osstatus(LOG_ERROR, enc, "submitting raw fallback pixel buffer", code);
 		vt_encode_submission_cancel();
@@ -1837,6 +1845,7 @@ static bool vt_encode_texture(void *data, struct encoder_texture *texture, int64
 		return false;
 	if (!vt_encode_submission_reserve())
 		return true;
+	uint64_t entered_ns = vt_encode_timing_now();
 
 	bool completed = vt_wait_for_texture_completion(enc, texture->tex[0]);
 	if (!completed) {
@@ -1888,6 +1897,8 @@ static bool vt_encode_texture(void *data, struct encoder_texture *texture, int64
 	source_ref->lease_release = texture->lease_release;
 	source_ref->type = VT_FRAME_SOURCE_TEXTURE;
 	source_ref->references = 1;
+	source_ref->entered_ns = entered_ns;
+	source_ref->submitted_ns = vt_encode_timing_now();
 	vt_track_frame_source(enc, source_ref);
 
 	CMTime frame_pts = CMTimeMake(pts, enc->fps_num);
