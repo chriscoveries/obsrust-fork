@@ -2457,6 +2457,15 @@ EXPORT void obs_encoder_update(obs_encoder_t *encoder, obs_data_t *settings);
 /** Gets extra data (headers) associated with this context */
 EXPORT bool obs_encoder_get_extra_data(const obs_encoder_t *encoder, uint8_t **extra_data, size_t *size);
 
+/**
+ * Gets the codec configuration record the encoder supplies for the container
+ * (obs_encoder_info.get_codec_metadata), for example the record of
+ * HLG-compatible HDR HEVC that the MP4 muxer writes as a 'dvvC' box. Returns
+ * false when the encoder has none, or reports one without data. The buffer
+ * belongs to the encoder and must not be freed by the caller.
+ */
+EXPORT bool obs_encoder_get_codec_metadata(const obs_encoder_t *encoder, uint8_t **metadata, size_t *size);
+
 /** Returns the current settings for this encoder */
 EXPORT obs_data_t *obs_encoder_get_settings(const obs_encoder_t *encoder);
 

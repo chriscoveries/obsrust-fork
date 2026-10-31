@@ -38,6 +38,9 @@ enum mp4_mux_flags {
 	MP4_SKIP_FINALISATION = 1 << 2,
 	/* Use negative CTS instead of edit lists */
 	MP4_USE_NEGATIVE_CTS = 1 << 3,
+	/* Write the encoder's HLG-compatible HDR configuration record (dvvC)
+	 * beside hvcC (experimental) */
+	MP4_WRITE_HLG_COMPATIBLE_HDR_CONFIG = 1 << 4,
 };
 
 struct mp4_mux *mp4_mux_create(obs_output_t *output, struct serializer *serializer, enum mp4_mux_flags flags,

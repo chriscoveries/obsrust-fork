@@ -364,6 +364,26 @@ struct obs_encoder_info {
 	 * @param  data  Data returned from create
 	 */
 	void (*request_keyframe)(void *data);
+
+	/**
+	 * Video encoders only (optional): returns a codec configuration record
+	 * that a container writes next to the codec's own configuration, such
+	 * as the 24-byte record of HLG-compatible HDR HEVC (profile 8.4), which
+	 * the MP4 muxer writes as a 'dvvC' box beside 'hvcC'.
+	 *
+	 * The bytes are the encoder's own output, passed through unchanged:
+	 * they are not the Annex-B headers of get_extra_data, and libobs does
+	 * not read them. Like get_extra_data, the record may only exist once
+	 * the encoder has produced its first packet, so muxers ask for it when
+	 * they write the sample description, not when they start. The buffer
+	 * belongs to the encoder.
+	 *
+	 * @param       data      Data associated with this encoder context
+	 * @param[out]  metadata  Pointer to receive the record
+	 * @param[out]  size      Pointer to receive the size of the record
+	 * @return                true if a record is available, false otherwise
+	 */
+	bool (*get_codec_metadata)(void *data, uint8_t **metadata, size_t *size);
 };
 
 EXPORT void obs_register_encoder_s(const struct obs_encoder_info *info, size_t size);

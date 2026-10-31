@@ -686,6 +686,15 @@ bool obs_encoder_get_extra_data(const obs_encoder_t *encoder, uint8_t **extra_da
 	return false;
 }
 
+bool obs_encoder_get_codec_metadata(const obs_encoder_t *encoder, uint8_t **metadata, size_t *size)
+{
+	/* Not implemented yet (RED). */
+	UNUSED_PARAMETER(encoder);
+	UNUSED_PARAMETER(metadata);
+	UNUSED_PARAMETER(size);
+	return false;
+}
+
 obs_data_t *obs_encoder_get_settings(const obs_encoder_t *encoder)
 {
 	if (!obs_encoder_valid(encoder, "obs_encoder_get_settings"))

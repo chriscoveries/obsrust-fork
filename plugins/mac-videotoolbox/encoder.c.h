@@ -1166,6 +1166,15 @@ static bool vt_extra_data(void *data, uint8_t **extra_data, size_t *size)
     return true;
 }
 
+static bool vt_codec_metadata(void *data, uint8_t **metadata, size_t *size)
+{
+    /* Not implemented yet (RED). */
+    UNUSED_PARAMETER(data);
+    UNUSED_PARAMETER(metadata);
+    UNUSED_PARAMETER(size);
+    return false;
+}
+
 static const char *vt_getname(void *data)
 {
     struct vt_encoder_type_data *type_data = data;
@@ -1432,6 +1441,7 @@ void obs_module_post_load(void)
         .update = vt_update,
         .get_defaults2 = vt_defaults,
         .get_extra_data = vt_extra_data,
+        .get_codec_metadata = vt_codec_metadata,
         .free_type_data = vt_free_type_data,
         .caps = OBS_ENCODER_CAP_DYN_BITRATE | OBS_ENCODER_CAP_MULTITRACK_DYN_BITRATE,
     };
