@@ -106,16 +106,21 @@ private func createVideoTexturePair(
     return (pixelBuffer, lumaTexture, chromaTexture)
 }
 
+/// Measurement knob for test/perf/zero-copy-harness (#755). With `OBS_METAL_DISABLE_NV12` set, the renderer
+/// reports no NV12/P010 textures, as master's Metal renderer does, so libobs converts into separate plane
+/// textures and the raw route is the one master takes.
+private let videoTexturesDisabled = ProcessInfo.processInfo.environment["OBS_METAL_DISABLE_NV12"] != nil
+
 @_cdecl("device_nv12_available")
 public func device_nv12_available(device: UnsafeRawPointer) -> Bool {
     let device: MetalDevice = unretained(device)
-    return device.videoTextureCache != nil
+    return !videoTexturesDisabled && device.videoTextureCache != nil
 }
 
 @_cdecl("device_p010_available")
 public func device_p010_available(device: UnsafeRawPointer) -> Bool {
     let device: MetalDevice = unretained(device)
-    return device.videoTextureCache != nil
+    return !videoTexturesDisabled && device.videoTextureCache != nil
 }
 
 @_cdecl("device_texture_create_nv12")

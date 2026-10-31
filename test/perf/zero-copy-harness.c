@@ -5,9 +5,12 @@
  * VideoToolbox accepts N submissions, then prints the profiler
  * `download_frame` count and counted source-plane copy bytes.
  *
- * Usage: zero-copy-harness [frames=120] [--warmup=N] [--raw-fallback|--raw-no-gpu]
+ * Usage: zero-copy-harness [frames=120] [--warmup=N] [--raw-fallback|--raw-planar|--raw-no-gpu]
  * `--raw-fallback` keeps GPU conversion enabled but forces the encoder's raw
- * input route. `--raw-no-gpu` exercises legacy CPU input (`--raw` alias).
+ * input route. `--raw-planar` also turns off the renderer's NV12 textures
+ * (OBS_METAL_DISABLE_NV12), so libobs converts into separate plane textures
+ * as it does with master's Metal renderer, which has no NV12 textures.
+ * `--raw-no-gpu` exercises legacy CPU input (`--raw` alias).
  *
  * Timing (#755): the first N accepted submissions (default frames / 5) are
  * warm-up. Over the rest, the plugin reads process user + system CPU time at
@@ -284,6 +287,7 @@ static bool load_build_tree_modules(const char *argv0)
 int main(int argc, char **argv)
 {
 	bool force_raw_fallback = false;
+	bool raw_planar = false;
 	bool raw_no_gpu = false;
 	int want_frames = DEFAULT_FRAMES;
 	long warmup = -1;
@@ -297,13 +301,16 @@ int main(int argc, char **argv)
 			}
 		} else if (strcmp(argv[i], "--raw-fallback") == 0) {
 			force_raw_fallback = true;
+		} else if (strcmp(argv[i], "--raw-planar") == 0) {
+			raw_planar = true;
 		} else if (strcmp(argv[i], "--raw-no-gpu") == 0 || strcmp(argv[i], "--raw") == 0) {
 			raw_no_gpu = true;
 		} else {
 			char *end = NULL;
 			long parsed = strtol(argv[i], &end, 10);
 			if (!argv[i][0] || !end || *end || parsed <= 0 || parsed > INT32_MAX) {
-				fprintf(stderr, "usage: %s [frames=%d] [--warmup=N] [--raw-fallback|--raw-no-gpu]\n",
+				fprintf(stderr,
+					"usage: %s [frames=%d] [--warmup=N] [--raw-fallback|--raw-planar|--raw-no-gpu]\n",
 					argv[0], DEFAULT_FRAMES);
 				return 1;
 			}
@@ -316,10 +323,13 @@ int main(int argc, char **argv)
 		fprintf(stderr, "harness: --warmup must be below the frame count\n");
 		return 1;
 	}
-	if (force_raw_fallback && raw_no_gpu) {
+	if ((int)force_raw_fallback + (int)raw_planar + (int)raw_no_gpu > 1) {
 		fprintf(stderr, "harness: choose one raw mode\n");
 		return 1;
 	}
+	/* Read once by libobs-metal, before the renderer is created. */
+	if (raw_planar)
+		setenv("OBS_METAL_DISABLE_NV12", "1", 1);
 
 	if (!obs_startup("en", NULL, NULL)) {
 		fprintf(stderr, "harness: obs_startup failed\n");
@@ -374,7 +384,7 @@ int main(int argc, char **argv)
 		obs_shutdown();
 		return 1;
 	}
-	vt_test_force_raw_fn(force_raw_fallback || raw_no_gpu);
+	vt_test_force_raw_fn(force_raw_fallback || raw_planar || raw_no_gpu);
 
 	obs_scene_t *scene = obs_scene_create("harness scene");
 	obs_source_t *color = obs_source_create("color_source", "harness color", NULL, NULL);
@@ -447,7 +457,10 @@ int main(int argc, char **argv)
 	uint64_t waits = waits_after >= waits_before ? waits_after - waits_before : 0;
 	uint64_t bytes_per_submission = submissions ? copied_bytes / submissions : 0;
 	uint64_t bytes_remainder = submissions ? copied_bytes % submissions : copied_bytes;
-	const char *path = force_raw_fallback ? "forced-raw-fallback" : raw_no_gpu ? "raw-no-gpu" : "texture";
+	const char *path = force_raw_fallback ? "forced-raw-fallback"
+			   : raw_planar       ? "raw-planar"
+			   : raw_no_gpu       ? "raw-no-gpu"
+					      : "texture";
 	printf("resolution=1920x1080 format=NV12 gpu_conversion=%s path=%s submissions=%llu output_frames=%d "
 	       "copied_bytes=%llu copied_bytes_per_submission=%llu remainder=%llu waits=%llu\n",
 	       raw_no_gpu ? "false" : "true", path, (unsigned long long)submissions, frames,
@@ -498,7 +511,7 @@ int main(int argc, char **argv)
 			(unsigned long long)submissions);
 		return 1;
 	}
-	if (force_raw_fallback || raw_no_gpu) {
+	if (force_raw_fallback || raw_planar || raw_no_gpu) {
 		uint64_t expected_copy_bytes = submissions * NV12_1080P_BYTES;
 		if (copied_bytes != expected_copy_bytes) {
 			fprintf(stderr,
