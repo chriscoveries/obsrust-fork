@@ -304,6 +304,7 @@
     "build/libobs.rust-variadic+.h.c"
   ],
   "LIBOBS_WINDOWS_SOURCES": [
+    "audio-monitoring/monitor-delay.h",
     "audio-monitoring/win32/wasapi-output.h",
     "obs-win-crash-report.h",
     "obs-windows-keys.h",
