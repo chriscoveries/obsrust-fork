@@ -94,8 +94,9 @@ if(ENABLE_WAYLAND)
 
   if(TARGET gio::gio)
     target_sources(libobs-objects PRIVATE build/libobs.nix-portal-shortcuts+.h.c obs-nix-portal-shortcuts.h)
-    # obs-nix-portal-shortcut-ids.c and obs-nix-portal-shortcut-sets.c have Rust ports: C
-    # reference/rollback only (sources.cmake).
+    # obs-nix-portal-shortcut-ids.c, obs-nix-portal-shortcut-sets.c and
+    # obs-nix-portal-shortcut-status.c have Rust ports: C reference/rollback only
+    # (sources.cmake).
     obs_libobs_add_c_sources(${LIBOBS_WAYLAND_GIO_PORTED_SOURCES})
     target_compile_definitions(libobs-objects PUBLIC HAVE_GLOBAL_SHORTCUTS_PORTAL)
     target_compile_definitions(libobs-objects PRIVATE OBS_PORTAL_APP_ID="${OBS_DESKTOP_ID}")
