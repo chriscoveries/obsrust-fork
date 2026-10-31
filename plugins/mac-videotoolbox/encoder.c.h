@@ -61,6 +61,7 @@ struct vt_encoder {
     bool hw_enc;
     DARRAY(uint8_t) packet_data;
     DARRAY(uint8_t) extra_data;
+    DARRAY(uint8_t) codec_metadata;
 };
 
 static const char *codec_type_to_print_fmt(CMVideoCodecType codec_type)
@@ -618,6 +619,7 @@ static void vt_destroy(void *data)
         }
         da_free(enc->packet_data);
         da_free(enc->extra_data);
+        da_free(enc->codec_metadata);
         bfree(enc);
     }
 }
@@ -954,6 +956,27 @@ static bool convert_sample_to_annexb(struct vt_encoder *enc, struct darray *pack
     return true;
 }
 
+/* HLG HEVC Main10 from VideoToolbox (HEVC profile 8.4) comes with a
+ * configuration record for the container, the "dvvC" atom among the format
+ * description's sample description extension atoms. Keep it with the parameter
+ * sets taken from the same description, for vt_codec_metadata(). */
+static void cache_codec_metadata(struct vt_encoder *enc, CMFormatDescriptionRef format_desc)
+{
+    CFDictionaryRef atoms = (CFDictionaryRef) CMFormatDescriptionGetExtension(
+        format_desc, kCMFormatDescriptionExtension_SampleDescriptionExtensionAtoms);
+    if (!atoms || CFGetTypeID(atoms) != CFDictionaryGetTypeID())
+        return;
+
+    CFDataRef record = (CFDataRef) CFDictionaryGetValue(atoms, CFSTR("dvvC"));
+    if (!record || CFGetTypeID(record) != CFDataGetTypeID() || CFDataGetLength(record) <= 0)
+        return;
+
+    da_resize(enc->codec_metadata, 0);
+    da_push_back_array(enc->codec_metadata, CFDataGetBytePtr(record), (size_t) CFDataGetLength(record));
+    VT_BLOG(LOG_INFO, "encoder supplied an HLG-compatible HDR configuration record (%zu bytes)",
+            enc->codec_metadata.num);
+}
+
 static bool is_sample_keyframe(CMSampleBufferRef buffer)
 {
     CFArrayRef attachments = CMSampleBufferGetSampleAttachmentsArray(buffer, false);
@@ -998,6 +1021,9 @@ static bool parse_sample(struct vt_encoder *enc, CMSampleBufferRef buffer, struc
     if (has_annexb) {
         if (!convert_sample_to_annexb(enc, &enc->packet_data.da, extra_data, buffer, keyframe))
             goto fail;
+        // The keyframe just gave the extra data: its description has the record too
+        if (extra_data && keyframe)
+            cache_codec_metadata(enc, CMSampleBufferGetFormatDescription(buffer));
     } else {
         if (!handle_prores_packet(enc, buffer))
             goto fail;
@@ -1168,11 +1194,13 @@ static bool vt_extra_data(void *data, uint8_t **extra_data, size_t *size)
 
 static bool vt_codec_metadata(void *data, uint8_t **metadata, size_t *size)
 {
-    /* Not implemented yet (RED). */
-    UNUSED_PARAMETER(data);
-    UNUSED_PARAMETER(metadata);
-    UNUSED_PARAMETER(size);
-    return false;
+    struct vt_encoder *enc = (struct vt_encoder *) data;
+    if (enc->codec_metadata.num == 0)
+        return false;
+
+    *metadata = enc->codec_metadata.array;
+    *size = enc->codec_metadata.num;
+    return true;
 }
 
 static const char *vt_getname(void *data)

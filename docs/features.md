@@ -254,6 +254,17 @@ not get a line.
   HEVC when it was disabled at build time. *Linux*, pending merge. PR
   [#1333](https://github.com/obs-rust/obs-studio/pull/1333).
 
+- **HLG-compatible HDR signaling in MP4 (experimental).** With
+  `write_hlg_compatible_hdr_config=1` in the custom muxer settings of a
+  Hybrid MP4 or Hybrid MOV recording, an HLG HEVC recording from the Apple
+  VideoToolbox encoder carries the encoder's HDR configuration record (a
+  `dvvC` box next to `hvcC`). Players that support HEVC profile 8.4 then also
+  use the dynamic HDR metadata the encoder already writes into every frame;
+  other players still show standard HLG. Off by default; without the option,
+  or with an encoder that supplies no record, recordings do not change.
+  *macOS*, pending merge. PR
+  [#742](https://github.com/obs-rust/obs-studio/pull/742).
+
 - **wake buffered producers after disk errors.** Buffered recording producers wake and report failure after a disk write error. *All*, 2026-10-20. Issue [#1533](https://github.com/obs-rust/obs-studio/issues/1533), PR [#1536](https://github.com/obs-rust/obs-studio/pull/1536).
 
 - **Enhanced Broadcasting encoder controls.** Enhanced Broadcasting stream

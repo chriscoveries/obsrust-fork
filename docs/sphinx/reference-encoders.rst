@@ -183,6 +183,22 @@ Encoder Definition Structure (obs_encoder_info)
    before a keyframe. It is called from the thread starting the output, so
    set a flag that the next encode call acts on.
 
+.. member:: bool (*get_codec_metadata)(void *data, uint8_t **metadata, size_t *size)
+
+   Video encoders only (optional). Returns a codec configuration record
+   that a container writes next to the codec's own configuration, such as
+   the 24-byte record of HLG-compatible HDR HEVC (profile 8.4), which the
+   MP4 muxer writes as a 'dvvC' box beside 'hvcC' when its
+   ``write_hlg_compatible_hdr_config`` option is set. The bytes are the
+   encoder's own output, passed through unchanged; they are not the headers
+   of get_extra_data. Like extra data, the record may only exist once the
+   encoder has produced its first packet, so muxers ask for it when they
+   write the sample description. The buffer belongs to the encoder.
+
+   :param  metadata: Pointer to receive the record
+   :param  size:     Pointer to receive the size of the record
+   :return:          true if a record is available, false otherwise
+
 Encoder Packet Structure (encoder_packet)
 -----------------------------------------
 
@@ -530,6 +546,17 @@ General Encoder Functions
 
    :return: *true* if successful, *false* if no extra data associated
             with this encoder
+
+---------------------
+
+.. function:: bool obs_encoder_get_codec_metadata(const obs_encoder_t *encoder, uint8_t **metadata, size_t *size)
+
+   Gets the codec configuration record the encoder supplies for the
+   container (see get_codec_metadata above). The buffer belongs to the
+   encoder and must not be freed.
+
+   :return: *true* if successful, *false* if the encoder has no record, or
+            reports one without data
 
 ---------------------
 

@@ -478,6 +478,44 @@ static size_t mp4_write_hvcC(struct mp4_mux *mux, obs_encoder_t *enc)
 	return box_size;
 }
 
+/* The configuration record of HLG-compatible HDR HEVC (profile 8.4): 64 bits
+ * of fields (version, profile, level, layer flags, compatibility ID) and four
+ * reserved 32-bit words. */
+#define MP4_HDR_CONFIG_RECORD_SIZE 24
+
+/// HLG-compatible HDR configuration box ('dvvC') of the HEVC sample entry,
+/// right after hvcC (experimental, MP4_WRITE_HLG_COMPATIBLE_HDR_CONFIG). The
+/// payload is the encoder's configuration record, written as it is.
+static size_t mp4_write_dvvC(struct mp4_mux *mux, obs_encoder_t *enc)
+{
+	struct serializer *s = mux->serializer;
+
+	if (!(mux->flags & MP4_WRITE_HLG_COMPATIBLE_HDR_CONFIG))
+		return 0;
+
+	/* Asked for when the sample description is written: like the extra
+	 * data, the encoder has the record only after its first packet. */
+	uint8_t *record;
+	size_t size;
+	if (!obs_encoder_get_codec_metadata(enc, &record, &size)) {
+		info("Encoder '%s' has no HLG-compatible HDR configuration record, writing none",
+		     obs_encoder_get_name(enc));
+		return 0;
+	}
+
+	if (size != MP4_HDR_CONFIG_RECORD_SIZE) {
+		warn("HLG-compatible HDR configuration record of encoder '%s' is %zu bytes, not %d, writing none",
+		     obs_encoder_get_name(enc), size, MP4_HDR_CONFIG_RECORD_SIZE);
+		return 0;
+	}
+
+	size_t box_size = size + 8;
+	write_box(s, box_size, "dvvC");
+	s_write(s, record, size);
+
+	return box_size;
+}
+
 #endif
 
 /// AV1 ISOBMFF 2.3. AV1 Codec Configuration Box
@@ -688,6 +726,9 @@ static size_t mp4_write_hvc1(struct mp4_mux *mux, obs_encoder_t *enc)
 
 	// avcC
 	mp4_write_hvcC(mux, enc);
+
+	// dvvC (HLG-compatible HDR configuration, experimental)
+	mp4_write_dvvC(mux, enc);
 
 	// colr
 	mp4_write_colr(mux, enc);
@@ -3053,3 +3094,4 @@ bool mp4_mux_finalise(struct mp4_mux *mux)
 /* File-local macros (BUILD.md): out of the next file in the unity group. */
 #undef warn
 #undef info
+#undef MP4_HDR_CONFIG_RECORD_SIZE
