@@ -1,6 +1,7 @@
 //! Rust ports of `libobs/graphics`, and of the units extracted from
 //! `libobs/graphics/graphics.c.h`: so far `graphics-sprite.c.h`, the sprite
-//! and texture upload geometry ([`sprite`]), and from `libobs/graphics/graphics-ffmpeg.c.h`:
+//! and texture upload geometry ([`sprite`]), and `graphics-immediate.c.h`,
+//! the immediate-mode vertex counts and texture units ([`immediate`]), and from `libobs/graphics/graphics-ffmpeg.c.h`:
 //! `graphics-ffmpeg-orient.c.h`, the image orientation and size check
 //! ([`image_orient`]).
 //!
@@ -26,6 +27,7 @@ pub mod gif_blocks;
 pub mod gif_frame;
 pub mod image_file;
 pub mod image_orient;
+pub mod immediate;
 pub mod lzw;
 pub mod math_extra;
 pub mod matrix3;

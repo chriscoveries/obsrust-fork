@@ -62,6 +62,12 @@ static inline bool gs_valid(const char *f)
 
 #define IMMEDIATE_COUNT 512
 
+_Static_assert(IMMEDIATE_COUNT == GS_IMMEDIATE_COUNT, "graphics-immediate.h counts the immediate buffer");
+_Static_assert(sizeof(((struct graphics_subsystem *)0)->texverts) /
+			       sizeof(((struct graphics_subsystem *)0)->texverts[0]) ==
+		       GS_IMMEDIATE_TEX_ARRAYS,
+	       "graphics-immediate.h counts the texture arrays");
+
 void gs_enum_adapters(bool (*callback)(void *param, const char *name, uint32_t id), void *param)
 {
 	/* ISO C forbids passing a function pointer where gs_valid_p() takes an
@@ -568,11 +574,6 @@ void gs_render_start(bool b_new)
 	}
 }
 
-static inline size_t min_size(const size_t a, const size_t b)
-{
-	return (a < b) ? a : b;
-}
-
 void gs_render_stop(enum gs_draw_mode mode)
 {
 	graphics_t *graphics = thread_graphics;
@@ -592,25 +593,26 @@ void gs_render_stop(enum gs_draw_mode mode)
 			gs_vbdata_destroy(graphics->vbd);
 		}
 
+		graphics->vbd = NULL;
 		return;
 	}
 
-	if (graphics->norms.num && (graphics->norms.num != graphics->verts.num)) {
+	if (gs_immediate_mismatch(graphics->norms.num, graphics->verts.num)) {
 		blog(LOG_ERROR, "gs_render_stop: normal count does "
 				"not match vertex count");
-		num = min_size(num, graphics->norms.num);
+		num = gs_immediate_cut(num, graphics->norms.num);
 	}
 
-	if (graphics->colors.num && (graphics->colors.num != graphics->verts.num)) {
+	if (gs_immediate_mismatch(graphics->colors.num, graphics->verts.num)) {
 		blog(LOG_ERROR, "gs_render_stop: color count does "
 				"not match vertex count");
-		num = min_size(num, graphics->colors.num);
+		num = gs_immediate_cut(num, graphics->colors.num);
 	}
 
-	if (graphics->texverts[0].num && (graphics->texverts[0].num != graphics->verts.num)) {
+	if (gs_immediate_mismatch(graphics->texverts[0].num, graphics->verts.num)) {
 		blog(LOG_ERROR, "gs_render_stop: texture vertex count does "
 				"not match vertex count");
-		num = min_size(num, graphics->texverts[0].num);
+		num = gs_immediate_cut(num, graphics->texverts[0].num);
 	}
 
 	if (graphics->using_immediate) {
@@ -637,7 +639,8 @@ void gs_render_stop(enum gs_draw_mode mode)
 gs_vertbuffer_t *gs_render_save(void)
 {
 	graphics_t *graphics = thread_graphics;
-	size_t num_tex, i;
+	struct gs_vb_data *vbd;
+	size_t num_tex, num, i;
 
 	if (!gs_valid("gs_render_save"))
 		return NULL;
@@ -645,7 +648,13 @@ gs_vertbuffer_t *gs_render_save(void)
 		return NULL;
 
 	if (!graphics->verts.num) {
+		da_free(graphics->verts);
+		da_free(graphics->norms);
+		da_free(graphics->colors);
+		for (i = 0; i < GS_IMMEDIATE_TEX_ARRAYS; i++)
+			da_free(graphics->texverts[i]);
 		gs_vbdata_destroy(graphics->vbd);
+		graphics->vbd = NULL;
 		return NULL;
 	}
 
@@ -656,7 +665,12 @@ gs_vertbuffer_t *gs_render_save(void)
 	graphics->vbd->points = graphics->verts.array;
 	graphics->vbd->normals = graphics->norms.array;
 	graphics->vbd->colors = graphics->colors.array;
-	graphics->vbd->num = graphics->verts.num;
+	num = graphics->verts.num;
+	num = gs_immediate_save_cut(num, graphics->norms.num);
+	num = gs_immediate_save_cut(num, graphics->colors.num);
+	for (i = 0; i < num_tex; i++)
+		num = gs_immediate_save_cut(num, graphics->texverts[i].num);
+	graphics->vbd->num = num;
 	graphics->vbd->num_tex = num_tex;
 
 	if (graphics->vbd->num_tex) {
@@ -668,9 +682,15 @@ gs_vertbuffer_t *gs_render_save(void)
 		}
 	}
 
+	for (i = gs_immediate_save_free_from(num_tex); i < GS_IMMEDIATE_TEX_ARRAYS; i++)
+		da_free(graphics->texverts[i]);
+
 	reset_immediate_arrays(graphics);
 
-	return gs_vertexbuffer_create(graphics->vbd, 0);
+	/* The buffer owns the data now. */
+	vbd = graphics->vbd;
+	graphics->vbd = NULL;
+	return gs_vertexbuffer_create(vbd, 0);
 }
 
 void gs_vertex2f(float x, float y)
@@ -696,7 +716,7 @@ void gs_normal3f(float x, float y, float z)
 
 static inline bool validvertsize(graphics_t *graphics, size_t num, const char *name)
 {
-	if (graphics->using_immediate && num == IMMEDIATE_COUNT) {
+	if (!gs_immediate_push_ok(graphics->using_immediate, num)) {
 		blog(LOG_ERROR,
 		     "%s: tried to use over %u "
 		     "for immediate rendering",
@@ -768,6 +788,8 @@ void gs_texcoord2v(const struct vec2 *v, int unit)
 	graphics_t *graphics = thread_graphics;
 
 	if (!gs_valid("gs_texcoord2v"))
+		return;
+	if (!gs_immediate_unit_ok(graphics->using_immediate, unit))
 		return;
 	if (!validvertsize(graphics, graphics->texverts[unit].num, "gs_texcoord"))
 		return;
