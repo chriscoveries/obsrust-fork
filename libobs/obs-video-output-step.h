@@ -107,6 +107,15 @@ enum obs_video_step_queue_action {
 	OBS_VIDEO_STEP_QUEUE_SWAP = 2,
 };
 
+/* The reserved synchronous slot is outside the conversion-target ring and
+ * therefore needs a copy.  Regular slots keep SWAP: their IOSurface-backed
+ * conversion target becomes the leased frame directly. */
+static inline enum obs_video_step_queue_action obs_video_step_queue_target(enum obs_video_step_queue_action action,
+									   bool sync_only)
+{
+	return sync_only ? OBS_VIDEO_STEP_QUEUE_COPY : action;
+}
+
 /* What render_video() renders once the main texture is drawn. */
 struct obs_video_step_render_targets {
 	/* Render the output texture and run the steps below. */

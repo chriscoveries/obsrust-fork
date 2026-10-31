@@ -470,10 +470,9 @@ static inline bool queue_frame(struct obs_core_video_mix *video, bool raw_active
 
 	enum obs_video_step_queue_action action = obs_video_step_queue(
 		video->gpu_encoder_avail_queue.size, video->gpu_encoder_queue.size, vframe_info->count, raw_active);
-	/* The reserved sync slot is never duplicated, and an async pool never
-	 * swaps its leased textures with the shared conversion targets. */
-	if (sync_only || (video->gpu_async_texture_pool && action == OBS_VIDEO_STEP_QUEUE_SWAP))
-		action = OBS_VIDEO_STEP_QUEUE_COPY;
+	/* The reserved sync slot is never duplicated.  Regular async slots swap
+	 * the rendered IOSurface target into the lease instead of blitting it. */
+	action = obs_video_step_queue_target(action, sync_only);
 
 	if (action == OBS_VIDEO_STEP_QUEUE_DUPLICATE) {
 		struct obs_tex_frame *tf =
