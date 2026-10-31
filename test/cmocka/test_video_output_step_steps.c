@@ -276,6 +276,18 @@ static void steps_queue_free_and_empty(void **state)
 	}
 }
 
+/* A regular async texture frame can keep the swap selected above: the
+ * conversion target is IOSurface-backed and becomes the leased frame, while
+ * the free pool texture becomes the next conversion target.  Only the
+ * reserved synchronous slot must copy because it is not part of that ring. */
+static void steps_queue_async_texture_renders_into_lease(void **state)
+{
+	(void)state;
+	assert_int_equal(obs_video_step_queue_target(OBS_VIDEO_STEP_QUEUE_SWAP, false), OBS_VIDEO_STEP_QUEUE_SWAP);
+	assert_int_equal(obs_video_step_queue_target(OBS_VIDEO_STEP_QUEUE_COPY, false), OBS_VIDEO_STEP_QUEUE_COPY);
+	assert_int_equal(obs_video_step_queue_target(OBS_VIDEO_STEP_QUEUE_SWAP, true), OBS_VIDEO_STEP_QUEUE_COPY);
+}
+
 /* Characterized, not endorsed: counts of 0 and below are new frames like
  * count 1 (video_sleep() gives counts of 1 and more), and the sizes are only
  * tested for 0, so a size that is not a whole frame counts as a frame. */
@@ -432,6 +444,7 @@ int main(void)
 		cmocka_unit_test(steps_queue_no_free_frame),
 		cmocka_unit_test(steps_queue_free_and_queued),
 		cmocka_unit_test(steps_queue_free_and_empty),
+		cmocka_unit_test(steps_queue_async_texture_renders_into_lease),
 		cmocka_unit_test(steps_queue_odd_inputs),
 		cmocka_unit_test(steps_queue_copy_uv),
 		cmocka_unit_test(steps_queue_count),
