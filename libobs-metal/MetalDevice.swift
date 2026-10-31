@@ -77,7 +77,9 @@ class MetalDevice {
 
         CVDisplayLinkCreateWithActiveCGDisplays(&displayLink)
         if displayLink == nil {
-            throw MetalError.MTLDeviceError.displayLinkCreationFailure
+            // No active display (every display asleep, or a windowless run such as test/perf/zero-copy-harness):
+            // there is no screen for a projector to present to, so the device starts without a display link.
+            OBSLog(.warning, "No active display; starting without a CVDisplayLink for projector output")
         }
 
         self.commandQueue = commandQueue
@@ -147,9 +149,11 @@ class MetalDevice {
             return kCVReturnSuccess
         }
 
+        guard let displayLink else { return }
+
         let opaqueSelf = UnsafeMutableRawPointer(Unmanaged.passUnretained(self).toOpaque())
 
-        CVDisplayLinkSetOutputCallback(displayLink!, displayLinkCallback, opaqueSelf)
+        CVDisplayLinkSetOutputCallback(displayLink, displayLinkCallback, opaqueSelf)
     }
 
     /// Iterates over all ``OBSSwapChain`` instances present on the ``MetalDevice`` instance and encodes a block
