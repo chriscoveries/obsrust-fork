@@ -242,8 +242,10 @@ static void exercise_surface_format(id<MTLDevice> device, OSType pixel_format, M
     assert_non_null(surface_frame_data[1]);
     assert_true(surface_linesizes[0] <= CVPixelBufferGetBytesPerRowOfPlane(fallback_path_buffer, 0));
     assert_true(surface_linesizes[1] <= CVPixelBufferGetBytesPerRowOfPlane(fallback_path_buffer, 1));
+    vt_copy_bytes_reset();
     size_t fallback_bytes_copied = vt_copy_frame_to_pixbuf(fallback_path_buffer, surface_frame_data, surface_linesizes);
     assert_int_equal(fallback_bytes_copied, active_row_bytes * HEIGHT * 3 / 2);
+    assert_int_equal(vt_copy_bytes_total(), fallback_bytes_copied);
     assert_int_equal(CVPixelBufferUnlockBaseAddress(fallback_path_buffer, 0), kCVReturnSuccess);
     assert_int_equal(CVPixelBufferUnlockBaseAddress(texture_path_buffer, kCVPixelBufferLock_ReadOnly),
                      kCVReturnSuccess);
@@ -274,9 +276,11 @@ static void exercise_surface_format(id<MTLDevice> device, OSType pixel_format, M
                          CVPixelBufferGetHeightOfPlane(surface_fallback_buffer, plane));
         iosurface_expected_bytes += iosurface_linesizes[plane] * IOSurfaceGetHeightOfPlane(surface, plane);
     }
+    vt_copy_bytes_reset();
     size_t surface_fallback_bytes =
         vt_copy_frame_to_pixbuf(surface_fallback_buffer, iosurface_data, iosurface_linesizes);
     assert_int_equal(surface_fallback_bytes, iosurface_expected_bytes);
+    assert_int_equal(vt_copy_bytes_total(), surface_fallback_bytes);
     assert_int_equal(CVPixelBufferUnlockBaseAddress(surface_fallback_buffer, 0), kCVReturnSuccess);
     assert_int_equal(IOSurfaceUnlock(surface, kIOSurfaceLockReadOnly, NULL), kIOReturnSuccess);
 

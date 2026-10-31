@@ -27,4 +27,5 @@
 #include "plugins/mac-videotoolbox/vt-frame-copy.h"
 
 /* vt-frame-copy.c */
+#include <stdatomic.h>
 #include <string.h>
