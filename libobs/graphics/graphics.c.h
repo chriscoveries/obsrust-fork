@@ -2327,6 +2327,30 @@ void *gs_texture_get_obj(gs_texture_t *tex)
 	return graphics->exports.gs_texture_get_obj(tex);
 }
 
+void *gs_texture_get_iosurface(gs_texture_t *tex)
+{
+	graphics_t *graphics = thread_graphics;
+
+	if (!gs_valid_p("gs_texture_get_iosurface", tex))
+		return NULL;
+	if (!graphics->exports.gs_texture_get_iosurface)
+		return NULL;
+
+	return graphics->exports.gs_texture_get_iosurface(tex);
+}
+
+bool gs_texture_wait_for_completion(gs_texture_t *tex)
+{
+	graphics_t *graphics = thread_graphics;
+
+	if (!gs_valid_p("gs_texture_wait_for_completion", tex))
+		return false;
+	if (!graphics->exports.device_texture_wait_for_completion)
+		return false;
+
+	return graphics->exports.device_texture_wait_for_completion(graphics->device, tex);
+}
+
 void gs_cubetexture_destroy(gs_texture_t *cubetex)
 {
 	graphics_t *graphics = thread_graphics;
@@ -2755,6 +2779,8 @@ bool gs_texture_create_nv12(gs_texture_t **tex_y, gs_texture_t **tex_uv, uint32_
 								       flags);
 		if (success)
 			return true;
+		if (graphics->exports.device_get_type() == GS_DEVICE_METAL)
+			return false;
 	}
 
 	*tex_y = gs_texture_create(width, height, GS_R8, 1, NULL, flags);
@@ -2793,6 +2819,8 @@ bool gs_texture_create_p010(gs_texture_t **tex_y, gs_texture_t **tex_uv, uint32_
 								       flags);
 		if (success)
 			return true;
+		if (graphics->exports.device_get_type() == GS_DEVICE_METAL)
+			return false;
 	}
 
 	*tex_y = gs_texture_create(width, height, GS_R16, 1, NULL, flags);

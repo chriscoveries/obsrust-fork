@@ -48,6 +48,8 @@ class MetalTexture {
     var sRGBtexture: MTLTexture?
     var texture: MTLTexture
     var stageBuffer: MetalStageBuffer?
+    var videoPixelBuffer: CVPixelBuffer?
+    var cvMetalTexture: CVMetalTexture?
 
     /// Binds the provided `IOSurfaceRef` to a new `MTLTexture` instance
     /// - Parameters:

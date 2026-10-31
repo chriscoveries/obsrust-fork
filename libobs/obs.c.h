@@ -82,15 +82,20 @@ static bool obs_init_gpu_conversion(struct obs_core_video_mix *video)
 	video->convert_textures_encode[0] = NULL;
 	video->convert_textures_encode[1] = NULL;
 	video->convert_textures_encode[2] = NULL;
+	uint32_t yuv_flags = GS_RENDER_TARGET | GS_SHARED_KM_TEX;
+	if (info->range == VIDEO_RANGE_FULL && gs_get_device_type() == GS_DEVICE_METAL)
+		yuv_flags |= GS_FULL_RANGE_TEX;
 	if (video->using_nv12_tex) {
 		if (!gs_texture_create_nv12(&video->convert_textures_encode[0], &video->convert_textures_encode[1],
-					    info->width, info->height, GS_RENDER_TARGET | GS_SHARED_KM_TEX)) {
-			return false;
+					    info->width, info->height, yuv_flags)) {
+			video->using_nv12_tex = false;
+			blog(LOG_WARNING, "NV12 encode texture allocation failed; using raw video input");
 		}
 	} else if (video->using_p010_tex) {
 		if (!gs_texture_create_p010(&video->convert_textures_encode[0], &video->convert_textures_encode[1],
-					    info->width, info->height, GS_RENDER_TARGET | GS_SHARED_KM_TEX)) {
-			return false;
+					    info->width, info->height, yuv_flags)) {
+			video->using_p010_tex = false;
+			blog(LOG_WARNING, "P010 encode texture allocation failed; using raw video input");
 		}
 	}
 
@@ -3348,9 +3353,47 @@ obs_data_t *obs_get_private_data(void)
 	return private_data;
 }
 
-extern bool init_gpu_encoding(struct obs_core_video_mix *video);
 extern void stop_gpu_encoding_thread(struct obs_core_video_mix *video);
 extern void free_gpu_encoding(struct obs_core_video_mix *video);
+
+struct gpu_encode_probe_context {
+	struct obs_core_video_mix *video;
+	obs_encoder_t *encoder;
+};
+
+static bool gpu_encode_sample_probe(void *data)
+{
+	struct gpu_encode_probe_context *context = data;
+	struct obs_tex_frame *frame = deque_data(&context->video->gpu_encoder_avail_queue, 0);
+	if (!frame)
+		frame = deque_data(&context->video->gpu_encoder_queue, 0);
+	if (!frame)
+		return false;
+
+	struct encoder_texture texture = {0};
+	texture.tex[0] = frame->tex;
+	texture.tex[1] = frame->tex_uv;
+	texture.iosurface = frame->iosurface;
+	return context->encoder->info.can_encode_texture(context->encoder->context.data, &texture);
+}
+
+static void gpu_encode_texture_fallback(void *data)
+{
+	struct gpu_encode_probe_context *context = data;
+	obs_encoder_texture_fallback(context->encoder, "IOSurface or VideoToolbox texture setup failed");
+}
+
+static void gpu_encode_stop_worker(void *data)
+{
+	struct gpu_encode_probe_context *context = data;
+	stop_gpu_encoding_thread(context->video);
+}
+
+static void gpu_encode_free_resources(void *data)
+{
+	struct gpu_encode_probe_context *context = data;
+	free_gpu_encoding(context->video);
+}
 
 bool start_gpu_encode(obs_encoder_t *encoder)
 {
@@ -3358,6 +3401,15 @@ bool start_gpu_encode(obs_encoder_t *encoder)
 	bool success = true;
 	if (!video)
 		return false;
+	bool async_texture = (encoder->info.caps & OBS_ENCODER_CAP_ASYNC_TEXTURE) != 0;
+	bool created_textures = false;
+	struct gpu_encode_probe_context probe_context = {.video = video, .encoder = encoder};
+	const struct obs_gpu_encode_probe_ops probe_ops = {
+		.sample_probe = gpu_encode_sample_probe,
+		.fallback = gpu_encode_texture_fallback,
+		.stop_worker = gpu_encode_stop_worker,
+		.free_resources = gpu_encode_free_resources,
+	};
 
 	/* Pin the mix through pool initialization and any teardown-condition wait. */
 	os_atomic_inc_long(&video->gpu_encoder_active);
@@ -3376,12 +3428,26 @@ bool start_gpu_encode(obs_encoder_t *encoder)
 	obs_enter_graphics();
 	pthread_mutex_lock(&video->gpu_encoder_mutex);
 
-	if (!video->gpu_encoders.num)
-		success = init_gpu_encoding(video);
-	if (success)
+	if (!video->gpu_encoders.num) {
+		created_textures = true;
+		success = init_gpu_encoding(video, async_texture);
+	} else if (async_texture && !video->gpu_async_texture_pool) {
+		/* The current synchronous pool may swap textures with the shared conversion targets. */
+		success = false;
+	} else if (async_texture && !video->gpu_async_texture_encoders) {
+		success = gpu_encoding_set_iosurfaces(video);
+	}
+	success =
+		obs_gpu_encode_probe_and_cleanup(success, async_texture, created_textures, &probe_ops, &probe_context);
+	if (success) {
+		if (async_texture) {
+			video->gpu_async_texture_encoders++;
+			video->gpu_async_texture_pool = true;
+		} else {
+			video->gpu_sync_texture_encoders++;
+		}
 		da_push_back(video->gpu_encoders, &encoder);
-	else
-		free_gpu_encoding(video);
+	}
 
 	pthread_mutex_unlock(&video->gpu_encoder_mutex);
 	obs_leave_graphics();
@@ -3410,6 +3476,10 @@ void stop_gpu_encode(obs_encoder_t *encoder)
 
 	pthread_mutex_lock(&video->gpu_encoder_mutex);
 	da_erase_item(video->gpu_encoders, &encoder);
+	if (encoder->info.caps & OBS_ENCODER_CAP_ASYNC_TEXTURE)
+		video->gpu_async_texture_encoders--;
+	else
+		video->gpu_sync_texture_encoders--;
 	if (!video->gpu_encoders.num) {
 		call_free = true;
 		video->gpu_encoder_tearing_down = true;
@@ -3422,6 +3492,8 @@ void stop_gpu_encode(obs_encoder_t *encoder)
 	pthread_mutex_unlock(&video->gpu_encoder_lifecycle_mutex);
 
 	os_event_wait(video->gpu_encode_inactive);
+	if ((encoder->info.caps & OBS_ENCODER_CAP_ASYNC_TEXTURE) && encoder->info.drain_texture_encode)
+		encoder->info.drain_texture_encode(encoder->context.data);
 
 	if (call_free) {
 		stop_gpu_encoding_thread(video);

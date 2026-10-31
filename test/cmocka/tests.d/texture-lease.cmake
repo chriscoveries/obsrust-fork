@@ -1,0 +1,5 @@
+add_executable(test_texture_lease test_texture_lease.c "${CMAKE_SOURCE_DIR}/libobs/obs-texture-lease.c.h")
+target_include_directories(test_texture_lease PRIVATE ${CMOCKA_INCLUDE_DIR})
+target_link_libraries(test_texture_lease PRIVATE OBS::libobs ${CMOCKA_LIBRARIES})
+add_dependencies(cmocka-tests test_texture_lease)
+add_test(test_texture_lease ${CMAKE_CURRENT_BINARY_DIR}/test_texture_lease)

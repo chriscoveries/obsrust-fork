@@ -468,6 +468,8 @@ EXPORT enum gs_color_format gs_texrender_get_format(const gs_texrender_t *texren
 				 *    creating a vertex/index buffer */
 #define GS_SHARED_TEX (1 << 5)
 #define GS_SHARED_KM_TEX (1 << 6)
+/* Allocate YUV textures with a full-range CoreVideo/IOSurface pixel format. */
+#define GS_FULL_RANGE_TEX (1 << 7)
 
 /* ---------------- */
 /* global functions */
@@ -741,6 +743,10 @@ EXPORT bool gs_texture_is_rect(const gs_texture_t *tex);
  * For example, for GL, this is a GLuint*.  For D3D11, ID3D11Texture2D*.
  */
 EXPORT void *gs_texture_get_obj(gs_texture_t *tex);
+/* Returns an unretained native IOSurface pointer when the texture is backed by one. */
+EXPORT void *gs_texture_get_iosurface(gs_texture_t *tex);
+/* Waits for previously submitted Metal work touching this texture to complete. */
+EXPORT bool gs_texture_wait_for_completion(gs_texture_t *tex);
 
 EXPORT void gs_cubetexture_destroy(gs_texture_t *cubetex);
 EXPORT uint32_t gs_cubetexture_get_size(const gs_texture_t *cubetex);

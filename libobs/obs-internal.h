@@ -39,6 +39,7 @@
 
 #include "obs.h"
 #include "obs-video-stats.h"
+#include "obs-texture-lease.h"
 
 #include <obsversion.h>
 #include <caption/caption.h>
@@ -458,14 +459,25 @@ struct obs_vframe_info {
 	int count;
 };
 
+struct obs_tex_frame_lease_state;
+
 struct obs_tex_frame {
 	gs_texture_t *tex;
 	gs_texture_t *tex_uv;
 	uint32_t handle;
+	void *iosurface;
 	uint64_t timestamp;
 	uint64_t lock_key;
 	int count;
 	bool released;
+	bool sync_only;
+	struct obs_tex_frame_lease_state *lease_state;
+};
+
+struct obs_tex_frame_lease_state {
+	struct obs_core_video_mix *video;
+	struct obs_tex_frame retired_frame;
+	struct obs_texture_lease_state lease;
 };
 
 struct obs_task_info {
@@ -507,7 +519,12 @@ struct obs_core_video_mix {
 	bool gpu_encoder_tearing_down;
 	struct deque gpu_encoder_queue;
 	struct deque gpu_encoder_avail_queue;
+	struct obs_tex_frame gpu_encoder_sync_frame;
 	DARRAY(obs_encoder_t *) gpu_encoders;
+	uint32_t gpu_async_texture_encoders;
+	uint32_t gpu_sync_texture_encoders;
+	bool gpu_async_texture_pool;
+	bool gpu_encoder_sync_frame_available;
 	os_sem_t *gpu_encode_semaphore;
 	os_event_t *gpu_encode_inactive;
 	pthread_t gpu_encode_thread;
@@ -1827,6 +1844,8 @@ struct obs_encoder {
 	volatile bool active;
 	volatile bool paused;
 	bool initialized;
+	bool gpu_encode_active;
+	bool gpu_texture_fallback_logged;
 
 	/* skipped by the gpu encode thread after a texture encode fails */
 	volatile bool gpu_encode_failed;
@@ -1935,9 +1954,12 @@ extern void obs_encoder_remove_output(struct obs_encoder *encoder, struct obs_ou
 
 extern bool start_gpu_encode(obs_encoder_t *encoder);
 extern void stop_gpu_encode(obs_encoder_t *encoder);
+extern bool init_gpu_encoding(struct obs_core_video_mix *video, bool async_texture);
+extern bool gpu_encoding_set_iosurfaces(struct obs_core_video_mix *video);
 
 extern bool do_encode(struct obs_encoder *encoder, struct encoder_frame *frame, const uint64_t *frame_cts);
 extern void send_off_encoder_packet(obs_encoder_t *encoder, bool success, bool received, struct encoder_packet *pkt);
+extern void obs_encoder_texture_fallback(obs_encoder_t *encoder, const char *reason);
 
 void obs_encoder_destroy(obs_encoder_t *encoder);
 

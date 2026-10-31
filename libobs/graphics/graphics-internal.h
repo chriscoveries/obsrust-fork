@@ -142,6 +142,8 @@ struct gs_exports {
 	void (*gs_texture_unmap)(gs_texture_t *tex);
 	bool (*gs_texture_is_rect)(const gs_texture_t *tex);
 	void *(*gs_texture_get_obj)(const gs_texture_t *tex);
+	void *(*gs_texture_get_iosurface)(const gs_texture_t *tex);
+	bool (*device_texture_wait_for_completion)(gs_device_t *device, gs_texture_t *tex);
 
 	void (*gs_cubetexture_destroy)(gs_texture_t *cubetex);
 	uint32_t (*gs_cubetexture_get_size)(const gs_texture_t *cubetex);

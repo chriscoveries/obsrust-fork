@@ -133,6 +133,7 @@ EXPORT bool device_shared_texture_available(void);
 EXPORT bool device_nv12_available(gs_device_t *device);
 EXPORT bool device_p010_available(gs_device_t *device);
 EXPORT uint32_t device_get_max_texture_size(gs_device_t *device);
+EXPORT bool device_texture_wait_for_completion(gs_device_t *device, gs_texture_t *tex);
 
 #ifdef __APPLE__
 EXPORT gs_texture_t *device_texture_create_from_iosurface(gs_device_t *device, void *iosurf);

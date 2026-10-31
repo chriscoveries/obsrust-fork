@@ -60,6 +60,7 @@
     "libobs-metal/metal-texture3d.swift",
     "libobs-metal/metal-unimplemented.swift",
     "libobs-metal/metal-vertexbuffer.swift",
+    "libobs-metal/metal-video-texture.swift",
     "libobs-metal/metal-zstencilbuffer.swift"
   ],
   "METAL_BRIDGE": [

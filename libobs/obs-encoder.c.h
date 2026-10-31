@@ -17,6 +17,11 @@
 
 #include "libobs/build/libobs.pch.h"
 
+_Static_assert(offsetof(struct encoder_texture, iosurface) ==
+		       offsetof(struct encoder_texture, lease_release) +
+			       sizeof(((struct encoder_texture *)0)->lease_release),
+	       "encoder_texture.iosurface must follow lease_release");
+
 #define encoder_active(encoder) os_atomic_load_bool(&encoder->active)
 #define set_encoder_active(encoder, val) os_atomic_set_bool(&encoder->active, val)
 
@@ -248,11 +253,39 @@ static inline void get_video_info(struct obs_encoder *encoder, struct video_scal
 
 static inline bool gpu_encode_available(const struct obs_encoder *encoder)
 {
+	bool async_texture = (encoder->info.caps & OBS_ENCODER_CAP_ASYNC_TEXTURE) != 0;
+	if (async_texture && (!encoder->info.encode_texture2 || !encoder->info.drain_texture_encode)) {
+		obs_encoder_texture_fallback((obs_encoder_t *)encoder, "async texture callbacks are incomplete");
+		return false;
+	}
+
 	struct obs_core_video_mix *video = get_mix_for_video(encoder->media);
 	if (!video)
 		return false;
-	return obs_encoder_lifecycle_pass_texture(encoder->info.caps) &&
-	       (video->using_p010_tex || video->using_nv12_tex);
+	if (async_texture &&
+	    (!encoder->info.can_encode_texture || !encoder->info.can_encode_texture(encoder->context.data, NULL))) {
+		obs_encoder_texture_fallback((obs_encoder_t *)encoder,
+					     "encoder does not support the current texture route");
+		return false;
+	}
+	if (!obs_encoder_lifecycle_pass_texture(encoder->info.caps) ||
+	    (!video->using_p010_tex && !video->using_nv12_tex)) {
+		if (async_texture)
+			obs_encoder_texture_fallback((obs_encoder_t *)encoder,
+						     "canvas has no NV12/P010 texture output");
+		return false;
+	}
+	return true;
+}
+
+void obs_encoder_texture_fallback(obs_encoder_t *encoder, const char *reason)
+{
+	if (encoder->gpu_texture_fallback_logged)
+		return;
+
+	blog(LOG_WARNING, "[%s] async texture input unavailable (%s); using raw video input", encoder->context.name,
+	     reason);
+	encoder->gpu_texture_fallback_logged = true;
 }
 
 /**
@@ -408,9 +441,8 @@ static void add_connection(struct obs_encoder *encoder)
 		struct video_scale_info info = {0};
 		get_video_info(encoder, &info);
 
-		if (gpu_encode_available(encoder)) {
-			start_gpu_encode(encoder);
-		} else {
+		encoder->gpu_encode_active = gpu_encode_available(encoder) && start_gpu_encode(encoder);
+		if (!encoder->gpu_encode_active) {
 			start_raw_video(encoder->media, &info, encoder->frame_rate_divisor, receive_video, encoder);
 		}
 	}
@@ -447,8 +479,9 @@ static void remove_connection(struct obs_encoder *encoder, bool shutdown)
 	if (!obs_encoder_bind_not_audio((int)encoder->info.type)) {
 		audio_output_disconnect(encoder->media, encoder->mixer_idx, receive_audio, encoder);
 	} else {
-		if (gpu_encode_available(encoder)) {
+		if (encoder->gpu_encode_active) {
 			stop_gpu_encode(encoder);
+			encoder->gpu_encode_active = false;
 		} else {
 			stop_raw_video(encoder->media, receive_video, encoder);
 		}
@@ -1577,7 +1610,10 @@ void full_stop(struct obs_encoder *encoder)
 		/* stopping a texture encoder waits for the gpu encode thread,
 		 * which is this thread, so let the outputs stop it when they
 		 * end capture. Flag it before they can. */
-		bool gpu_encode = gpu_encode_available(encoder);
+		/* Use the route committed by add_connection(). Re-probing here can
+		 * route an active texture encoder through raw cleanup on its own GPU
+		 * worker after a transient capability failure. */
+		bool gpu_encode = encoder->gpu_encode_active;
 		if (gpu_encode)
 			os_atomic_set_bool(&encoder->gpu_encode_failed, true);
 

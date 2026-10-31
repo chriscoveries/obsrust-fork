@@ -266,3 +266,9 @@ void *gs_texture_get_obj(gs_texture_t *tex)
 
 	return &tex2d->base.texture;
 }
+
+void *gs_texture_get_iosurface(gs_texture_t *tex)
+{
+	(void)tex;
+	return NULL;
+}

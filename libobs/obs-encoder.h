@@ -39,6 +39,8 @@ typedef struct obs_encoder obs_encoder_t;
 #define OBS_ENCODER_CAP_ROI (1 << 4)
 #define OBS_ENCODER_CAP_SCALING (1 << 5)
 #define OBS_ENCODER_CAP_MULTITRACK_DYN_BITRATE (1 << 6)
+/** The texture input may be retained after encode_texture2 returns. */
+#define OBS_ENCODER_CAP_ASYNC_TEXTURE (1 << 7)
 
 /** Specifies the encoder type */
 enum obs_encoder_type {
@@ -183,6 +185,14 @@ struct encoder_texture {
 	uint32_t handle;
 	/** Textures, length determined by format */
 	struct gs_texture *tex[4];
+	/** Optional asynchronous lifetime hooks. Acquire a token for each submission
+	 * that may outlive the callback. Release every non-NULL token exactly once,
+	 * including when submission fails. The token is invalid after release. */
+	void *lease_context;
+	void *(*lease_acquire)(void *lease_context);
+	void (*lease_release)(void *lease_token);
+	/** Optional IOSurface backing. Set only for OBS_ENCODER_CAP_ASYNC_TEXTURE encoders. */
+	void *iosurface;
 };
 
 /**
@@ -364,6 +374,11 @@ struct obs_encoder_info {
 	 * @param  data  Data returned from create
 	 */
 	void (*request_keyframe)(void *data);
+
+	/** Optional per-instance check. Async encoders receive NULL for route checks, then a sample texture at startup. */
+	bool (*can_encode_texture)(void *data, const struct encoder_texture *texture);
+	/** Required with OBS_ENCODER_CAP_ASYNC_TEXTURE; waits for retained texture submissions to complete. */
+	void (*drain_texture_encode)(void *data);
 };
 
 EXPORT void obs_register_encoder_s(const struct obs_encoder_info *info, size_t size);

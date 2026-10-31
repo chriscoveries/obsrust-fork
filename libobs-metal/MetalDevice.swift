@@ -16,6 +16,7 @@
  ******************************************************************************/
 
 import AppKit
+import CoreVideo
 import Foundation
 import Metal
 import simd
@@ -43,6 +44,7 @@ class MetalDevice {
 
     let device: MTLDevice
     let commandQueue: MTLCommandQueue
+    var videoTextureCache: CVMetalTextureCache?
     var renderState: MetalRenderState
     var swapChains = [OBSSwapChain]()
     let swapChainQueue = DispatchQueue(label: "swapchainUpdateQueue", qos: .userInteractive)
@@ -81,6 +83,13 @@ class MetalDevice {
         self.commandQueue = commandQueue
         self.nopVertexFunction = function
         self.fallbackVertexBuffer = buffer
+
+        var videoTextureCache: CVMetalTextureCache?
+        if CVMetalTextureCacheCreate(kCFAllocatorDefault, nil, device, nil, &videoTextureCache) == kCVReturnSuccess {
+            self.videoTextureCache = videoTextureCache
+        } else {
+            self.videoTextureCache = nil
+        }
 
         self.renderState = MetalRenderState(
             viewMatrix: identityMatrix,

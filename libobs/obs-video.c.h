@@ -451,8 +451,29 @@ static inline void stage_output_texture(struct obs_core_video_mix *video, int cu
 
 static inline bool queue_frame(struct obs_core_video_mix *video, bool raw_active, struct obs_vframe_info *vframe_info)
 {
-	const enum obs_video_step_queue_action action = obs_video_step_queue(
+	bool sync_only = false;
+	struct obs_tex_frame tf;
+	if (video->gpu_async_texture_pool && video->gpu_async_texture_encoders && video->gpu_sync_texture_encoders &&
+	    !video->gpu_encoder_avail_queue.size && video->gpu_encoder_sync_frame_available) {
+		/* Async encoders retain all regular slots. Keep the current frame
+		 * available to sync encoders through the reserved, unleased slot. */
+		tf = video->gpu_encoder_sync_frame;
+		video->gpu_encoder_sync_frame = (struct obs_tex_frame){0};
+		video->gpu_encoder_sync_frame_available = false;
+		sync_only = true;
+		video_output_inc_texture_skipped_frames(video->video);
+	}
+
+	if (!video->gpu_encoder_avail_queue.size && !sync_only &&
+	    obs_texture_lease_pool_exhaustion(video->gpu_encoder_queue.size != 0) == OBS_TEXTURE_POOL_DROP_NEWEST)
+		return false;
+
+	enum obs_video_step_queue_action action = obs_video_step_queue(
 		video->gpu_encoder_avail_queue.size, video->gpu_encoder_queue.size, vframe_info->count, raw_active);
+	/* The reserved sync slot is never duplicated, and an async pool never
+	 * swaps its leased textures with the shared conversion targets. */
+	if (sync_only || (video->gpu_async_texture_pool && action == OBS_VIDEO_STEP_QUEUE_SWAP))
+		action = OBS_VIDEO_STEP_QUEUE_COPY;
 
 	if (action == OBS_VIDEO_STEP_QUEUE_DUPLICATE) {
 		struct obs_tex_frame *tf =
@@ -468,8 +489,13 @@ static inline bool queue_frame(struct obs_core_video_mix *video, bool raw_active
 		goto finish;
 	}
 
-	struct obs_tex_frame tf;
-	deque_pop_front(&video->gpu_encoder_avail_queue, &tf, sizeof(tf));
+	if (!sync_only)
+		deque_pop_front(&video->gpu_encoder_avail_queue, &tf, sizeof(tf));
+	if (video->gpu_async_texture_pool && !sync_only && !obs_texture_lease_begin_frame(&tf.lease_state->lease)) {
+		deque_push_front(&video->gpu_encoder_avail_queue, &tf, sizeof(tf));
+		blog(LOG_ERROR, "GPU encoder texture pool returned a leased texture");
+		return false;
+	}
 
 	if (tf.released) {
 		obs_host_tex_frame_acquire(&tf);
@@ -490,12 +516,18 @@ static inline bool queue_frame(struct obs_core_video_mix *video, bool raw_active
 		tf.tex = tex;
 		tf.tex_uv = tex_uv;
 	}
+	if (video->gpu_async_texture_encoders)
+		tf.iosurface = gs_texture_get_iosurface(tf.tex);
 
 	tf.count = 1;
 	tf.timestamp = vframe_info->timestamp;
 	tf.released = true;
 	obs_host_tex_frame_release(&tf);
 	deque_push_back(&video->gpu_encoder_queue, &tf, sizeof(tf));
+	if (video->gpu_async_texture_encoders) {
+		/* Commit render writes before queuing a completion fence on the same Metal queue. */
+		gs_flush();
+	}
 
 	os_sem_post(video->gpu_encode_semaphore);
 
