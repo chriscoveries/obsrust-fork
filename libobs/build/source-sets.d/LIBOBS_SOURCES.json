@@ -155,6 +155,7 @@
   "media-io/media-remux.h",
   "media-io/video-frame.h",
   "media-io/video-io.h",
+  "media-io/video-scaler-overlap.h",
   "media-io/video-scaler-plan.h",
   "media-io/video-scaler.h",
   "graphics/axisang.h",
