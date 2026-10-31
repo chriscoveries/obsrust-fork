@@ -332,6 +332,7 @@ static OSStatus session_set_bitrate(VTCompressionSessionRef session, const char 
             log_osstatus(LOG_WARNING, NULL, "setting DataRateLimits on session", code);
             return noErr;
         }
+        return code;
     }
 
     return noErr;
