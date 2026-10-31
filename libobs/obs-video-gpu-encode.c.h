@@ -23,28 +23,26 @@ _Static_assert(OBS_ENCODER_GPU_GATES_WAIT_FRAMES == NUM_ENCODE_TEXTURE_FRAMES_TO
 	       "NUM_ENCODE_TEXTURE_FRAMES_TO_WAIT");
 _Static_assert(OBS_ENCODER_GPU_GATES_FORMAT_P010 == VIDEO_FORMAT_P010, "VIDEO_FORMAT_P010");
 
-struct obs_tex_frame_lease_token {
-	struct obs_tex_frame_lease_state *owner;
-	struct obs_texture_lease_token lease;
-};
-
 static void *encoder_texture_lease_acquire(void *opaque)
 {
 	struct obs_tex_frame_lease_state *state = opaque;
 	struct obs_core_video_mix *video = state->video;
-	struct obs_tex_frame_lease_token *token = bzalloc(sizeof(*token));
-	if (!token)
-		return NULL;
 
 	pthread_mutex_lock(&video->gpu_encoder_mutex);
-	bool acquired = obs_texture_lease_acquire(&state->lease, &token->lease);
-	pthread_mutex_unlock(&video->gpu_encoder_mutex);
-	if (!acquired) {
-		bfree(token);
-		return NULL;
+	struct obs_tex_frame_lease_token *token = NULL;
+	for (size_t i = 0; i < OBS_TEX_FRAME_LEASE_TOKEN_COUNT; i++) {
+		if (!state->tokens[i].lease.active) {
+			token = &state->tokens[i];
+			break;
+		}
 	}
+	bool acquired = token && obs_texture_lease_acquire(&state->lease, &token->lease);
+	if (acquired)
+		token->owner = state;
+	pthread_mutex_unlock(&video->gpu_encoder_mutex);
+	if (!acquired)
+		return NULL;
 
-	token->owner = state;
 	return token;
 }
 
@@ -59,7 +57,6 @@ static void encoder_texture_lease_release(void *opaque)
 	if (result == OBS_TEXTURE_LEASE_RECYCLED)
 		deque_push_back(&video->gpu_encoder_avail_queue, &state->retired_frame, sizeof(state->retired_frame));
 	pthread_mutex_unlock(&video->gpu_encoder_mutex);
-	bfree(token);
 }
 
 #define NBSP "\xC2\xA0"

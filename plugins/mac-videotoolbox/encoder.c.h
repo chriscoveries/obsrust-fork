@@ -30,6 +30,8 @@ static DARRAY(struct vt_prores_encoder_data) vt_prores_software_encoder_list;
 struct vt_frame_source_ref;
 struct vt_callback_context;
 
+#define VT_FRAME_SOURCE_POOL_SIZE 128
+
 struct vt_texture_pixel_buffer {
 	IOSurfaceRef surface;
 	CVPixelBufferRef pixel_buffer;
@@ -78,6 +80,8 @@ struct vt_encoder {
 	pthread_mutex_t texture_mutex;
 	pthread_cond_t texture_cond;
 	struct vt_frame_source_ref *frame_sources;
+	struct vt_frame_source_ref *free_frame_sources;
+	struct vt_frame_source_ref *frame_source_pool;
 	DARRAY(struct vt_texture_pixel_buffer) texture_pixel_buffers;
 	uint32_t pending_frame_submissions;
 	struct vt_callback_context *callback_context;
@@ -108,6 +112,7 @@ struct vt_frame_source_ref {
 	bool release_started;
 	bool release_completed;
 	bool pending_released;
+	bool pooled;
 	uint64_t entered_ns;
 	uint64_t submitted_ns;
 };
@@ -117,6 +122,12 @@ struct vt_callback_context {
 	struct vt_callback_context *next;
 	uintptr_t id;
 	uint32_t active_callbacks;
+};
+
+struct vt_frame_source_resources {
+	CVPixelBufferRef pixel_buffer;
+	void *lease_token;
+	void (*lease_release)(void *lease_token);
 };
 
 /* VideoToolbox may still deliver a callback after a failed drain and session
@@ -195,6 +206,44 @@ static void vt_unregister_callback_context(struct vt_encoder *enc)
 	bfree(context);
 }
 
+static bool vt_init_frame_source_pool(struct vt_encoder *enc)
+{
+	if (enc->frame_source_pool)
+		return true;
+
+	enc->frame_source_pool = bzalloc(VT_FRAME_SOURCE_POOL_SIZE * sizeof(*enc->frame_source_pool));
+	if (!enc->frame_source_pool)
+		return false;
+
+	for (size_t i = 0; i < VT_FRAME_SOURCE_POOL_SIZE; i++) {
+		struct vt_frame_source_ref *source_ref = &enc->frame_source_pool[i];
+		source_ref->pooled = true;
+		source_ref->next = enc->free_frame_sources;
+		enc->free_frame_sources = source_ref;
+	}
+	return true;
+}
+
+static void vt_free_frame_source_pool(struct vt_encoder *enc)
+{
+	bfree(enc->frame_source_pool);
+	enc->frame_source_pool = NULL;
+	enc->free_frame_sources = NULL;
+}
+
+static bool vt_recycle_frame_source_locked(struct vt_encoder *enc, struct vt_frame_source_ref *source_ref)
+{
+	if (!source_ref->pooled)
+		return false;
+
+	*source_ref = (struct vt_frame_source_ref){
+		.next = enc->free_frame_sources,
+		.pooled = true,
+	};
+	enc->free_frame_sources = source_ref;
+	return true;
+}
+
 static void vt_unref_texture_source(struct vt_frame_source_ref *source_ref)
 {
 	struct vt_encoder *enc = source_ref->encoder;
@@ -203,6 +252,8 @@ static void vt_unref_texture_source(struct vt_frame_source_ref *source_ref)
 	pthread_mutex_lock(&enc->texture_mutex);
 	assert(source_ref->references > 0);
 	free_source = --source_ref->references == 0;
+	if (free_source && vt_recycle_frame_source_locked(enc, source_ref))
+		free_source = false;
 	pthread_mutex_unlock(&enc->texture_mutex);
 
 	if (free_source)
@@ -230,14 +281,67 @@ static bool vt_take_frame_source(struct vt_encoder *enc, void *source, struct vt
 	return found;
 }
 
-static void vt_track_frame_source(struct vt_encoder *enc, struct vt_frame_source_ref *source_ref)
+static bool vt_take_frame_source_for_completion(struct vt_encoder *enc, void *source,
+						struct vt_frame_source_ref **source_ref,
+						struct vt_frame_source_resources *resources, bool *complete_release)
 {
-	assert(source_ref->type == VT_FRAME_SOURCE_RAW || source_ref->type == VT_FRAME_SOURCE_TEXTURE);
+	bool found = false;
+	*complete_release = false;
+
 	pthread_mutex_lock(&enc->texture_mutex);
+	struct vt_frame_source_ref **current = &enc->frame_sources;
+	while (*current) {
+		if (*current == source) {
+			*source_ref = *current;
+			*current = (*current)->next;
+			(*source_ref)->next = NULL;
+			found = true;
+			break;
+		}
+		current = &(*current)->next;
+	}
+
+	if (found) {
+		if ((*source_ref)->release_started) {
+			while (!(*source_ref)->release_completed)
+				pthread_cond_wait(&enc->texture_cond, &enc->texture_mutex);
+		} else {
+			(*source_ref)->release_started = true;
+			resources->pixel_buffer = (*source_ref)->pixel_buffer;
+			(*source_ref)->pixel_buffer = NULL;
+			resources->lease_token = (*source_ref)->lease_token;
+			(*source_ref)->lease_token = NULL;
+			resources->lease_release = (*source_ref)->lease_release;
+			(*source_ref)->lease_release = NULL;
+			*complete_release = true;
+		}
+	}
+	pthread_mutex_unlock(&enc->texture_mutex);
+
+	return found;
+}
+
+static struct vt_frame_source_ref *vt_track_new_frame_source(struct vt_encoder *enc,
+							     const struct vt_frame_source_ref *initial)
+{
+	if (!enc->frame_source_pool && !vt_init_frame_source_pool(enc))
+		return NULL;
+
+	pthread_mutex_lock(&enc->texture_mutex);
+	struct vt_frame_source_ref *source_ref = enc->free_frame_sources;
+	if (!source_ref) {
+		pthread_mutex_unlock(&enc->texture_mutex);
+		return NULL;
+	}
+	enc->free_frame_sources = source_ref->next;
+	*source_ref = *initial;
+	source_ref->pooled = true;
+	assert(source_ref->type == VT_FRAME_SOURCE_RAW || source_ref->type == VT_FRAME_SOURCE_TEXTURE);
 	source_ref->next = enc->frame_sources;
 	enc->frame_sources = source_ref;
 	enc->pending_frame_submissions++;
 	pthread_mutex_unlock(&enc->texture_mutex);
+	return source_ref;
 }
 
 static void vt_release_texture_source_resources(struct vt_frame_source_ref *source_ref)
@@ -286,6 +390,34 @@ static void vt_finish_texture_source(struct vt_frame_source_ref *source_ref)
 	}
 	assert(source_ref->references > 0);
 	free_source = --source_ref->references == 0;
+	if (free_source && vt_recycle_frame_source_locked(enc, source_ref))
+		free_source = false;
+	pthread_cond_broadcast(&enc->texture_cond);
+	pthread_mutex_unlock(&enc->texture_mutex);
+
+	if (free_source)
+		bfree(source_ref);
+}
+
+static void vt_finish_completed_frame_source(struct vt_frame_source_ref *source_ref, bool complete_release)
+{
+	struct vt_encoder *enc = source_ref->encoder;
+	bool free_source = false;
+
+	pthread_mutex_lock(&enc->texture_mutex);
+	if (complete_release) {
+		assert(source_ref->release_started);
+		source_ref->release_completed = true;
+	}
+	if (!source_ref->pending_released) {
+		assert(enc->pending_frame_submissions > 0);
+		enc->pending_frame_submissions--;
+		source_ref->pending_released = true;
+	}
+	assert(source_ref->references > 0);
+	free_source = --source_ref->references == 0;
+	if (free_source && vt_recycle_frame_source_locked(enc, source_ref))
+		free_source = false;
 	pthread_cond_broadcast(&enc->texture_cond);
 	pthread_mutex_unlock(&enc->texture_mutex);
 
@@ -740,7 +872,10 @@ void sample_encoded_callback(void *data, void *source, OSStatus status, VTEncode
 		return;
 	struct vt_encoder *enc = context->encoder;
 	struct vt_frame_source_ref *source_ref = NULL;
-	bool frame_source = source && vt_take_frame_source(enc, source, &source_ref);
+	struct vt_frame_source_resources resources = {0};
+	bool complete_release = false;
+	bool frame_source =
+		source && vt_take_frame_source_for_completion(enc, source, &source_ref, &resources, &complete_release);
 
 	if (status != noErr) {
 		log_osstatus(LOG_ERROR, enc, "encoder callback", status);
@@ -761,8 +896,11 @@ void sample_encoded_callback(void *data, void *source, OSStatus status, VTEncode
 		assert(source_ref->type == VT_FRAME_SOURCE_RAW || source_ref->type == VT_FRAME_SOURCE_TEXTURE);
 		if (status == noErr && buffer != NULL)
 			vt_encode_timing_record(source_ref->entered_ns, source_ref->submitted_ns);
-		vt_release_texture_source_resources(source_ref);
-		vt_finish_texture_source(source_ref);
+		if (resources.pixel_buffer)
+			CFRelease(resources.pixel_buffer);
+		if (resources.lease_release && resources.lease_token)
+			resources.lease_release(resources.lease_token);
+		vt_finish_completed_frame_source(source_ref, complete_release);
 	} else if (source)
 		VT_BLOG(LOG_ERROR, "VideoToolbox callback referenced an unknown frame record");
 	vt_release_callback_context(context);
@@ -983,6 +1121,7 @@ static void vt_destroy(void *data)
 			vt_invalidate_session(enc);
 		if (enc->texture_sync_initialized)
 			vt_clear_frame_source_tombstones(enc);
+		vt_free_frame_source_pool(enc);
 		vt_clear_texture_pixel_buffer_cache(enc);
 		if (enc->queue)
 			CFRelease(enc->queue);
@@ -1167,6 +1306,8 @@ static void *vt_create(obs_data_t *settings, obs_encoder_t *encoder)
 		return NULL;
 	}
 	enc->texture_sync_initialized = true;
+	if (!vt_init_frame_source_pool(enc))
+		goto fail;
 
 	OSStatus code;
 
@@ -1505,18 +1646,19 @@ static bool vt_get_cached_pixel_buffer(struct vt_encoder *enc, CVPixelBufferRef 
 static OSStatus vt_submit_raw_pixel_buffer(struct vt_encoder *enc, CVPixelBufferRef pixbuf, CMTime pts, CMTime duration,
 					   uint64_t entered_ns)
 {
-	struct vt_frame_source_ref *source_ref = bzalloc(sizeof(*source_ref));
+	struct vt_frame_source_ref initial = {
+		.encoder = enc,
+		.pixel_buffer = pixbuf,
+		.type = VT_FRAME_SOURCE_RAW,
+		.references = 1,
+		.entered_ns = entered_ns,
+		.submitted_ns = vt_encode_timing_now(),
+	};
+	struct vt_frame_source_ref *source_ref = vt_track_new_frame_source(enc, &initial);
 	if (!source_ref) {
 		CFRelease(pixbuf);
 		return kVTVideoEncoderMalfunctionErr;
 	}
-	source_ref->encoder = enc;
-	source_ref->pixel_buffer = pixbuf;
-	source_ref->type = VT_FRAME_SOURCE_RAW;
-	source_ref->references = 1;
-	source_ref->entered_ns = entered_ns;
-	source_ref->submitted_ns = vt_encode_timing_now();
-	vt_track_frame_source(enc, source_ref);
 
 	OSStatus code;
 #ifdef OBS_VT_ENCODER_TEST
@@ -1924,7 +2066,17 @@ static bool vt_encode_texture(void *data, struct encoder_texture *texture, int64
 	}
 
 	vt_set_pixel_buffer_attachments(enc, pixbuf);
-	struct vt_frame_source_ref *source_ref = bzalloc(sizeof(*source_ref));
+	struct vt_frame_source_ref initial = {
+		.encoder = enc,
+		.pixel_buffer = pixbuf,
+		.lease_token = lease_token,
+		.lease_release = texture->lease_release,
+		.type = VT_FRAME_SOURCE_TEXTURE,
+		.references = 1,
+		.entered_ns = entered_ns,
+		.submitted_ns = vt_encode_timing_now(),
+	};
+	struct vt_frame_source_ref *source_ref = vt_track_new_frame_source(enc, &initial);
 	if (!source_ref) {
 		bool fallback = vt_encode_texture_raw_fallback(enc, pixbuf, (IOSurfaceRef)texture->iosurface, pts,
 							       packet, received_packet);
@@ -1935,15 +2087,6 @@ static bool vt_encode_texture(void *data, struct encoder_texture *texture, int64
 
 	CMTime dur = CMTimeMake(enc->fps_den, enc->fps_num);
 	CMTime off = CMTimeMultiply(dur, 2);
-	source_ref->encoder = enc;
-	source_ref->pixel_buffer = pixbuf;
-	source_ref->lease_token = lease_token;
-	source_ref->lease_release = texture->lease_release;
-	source_ref->type = VT_FRAME_SOURCE_TEXTURE;
-	source_ref->references = 1;
-	source_ref->entered_ns = entered_ns;
-	source_ref->submitted_ns = vt_encode_timing_now();
-	vt_track_frame_source(enc, source_ref);
 
 	CMTime frame_pts = CMTimeMake(pts, enc->fps_num);
 	OSStatus code = VTCompressionSessionEncodeFrame(enc->session, pixbuf, frame_pts, dur, NULL, source_ref, NULL);

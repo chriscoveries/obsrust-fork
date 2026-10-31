@@ -465,6 +465,13 @@ struct obs_vframe_info {
 
 struct obs_tex_frame_lease_state;
 
+#define OBS_TEX_FRAME_LEASE_TOKEN_COUNT 128
+
+struct obs_tex_frame_lease_token {
+	struct obs_tex_frame_lease_state *owner;
+	struct obs_texture_lease_token lease;
+};
+
 struct obs_tex_frame {
 	gs_texture_t *tex;
 	gs_texture_t *tex_uv;
@@ -482,6 +489,7 @@ struct obs_tex_frame_lease_state {
 	struct obs_core_video_mix *video;
 	struct obs_tex_frame retired_frame;
 	struct obs_texture_lease_state lease;
+	struct obs_tex_frame_lease_token tokens[OBS_TEX_FRAME_LEASE_TOKEN_COUNT];
 };
 
 struct obs_task_info {
