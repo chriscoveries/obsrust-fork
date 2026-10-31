@@ -133,7 +133,9 @@ static struct obs_audio_data *noise_gate_filter_audio(void *data, struct obs_aud
 			ng->is_open = false;
 		}
 
-		ng->level = fmaxf(ng->level, cur_level) - decay_rate;
+		/* With no hysteresis the detector must follow the current sample.
+		 * A zero decay rate would otherwise retain the loudest level forever. */
+		ng->level = decay_rate == 0.0f ? cur_level : fmaxf(ng->level, cur_level) - decay_rate;
 
 		if (ng->is_open) {
 			ng->attenuation = fminf(1.0f, ng->attenuation + attack_rate);
