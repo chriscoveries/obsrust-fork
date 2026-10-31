@@ -21,6 +21,7 @@
  * This is a CLI measurement tool, not a cmocka unit test: it needs a full
  * build tree (graphics + encoder + output modules) and real GPU/VideoToolbox.
  */
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -155,12 +156,25 @@ static double percentile_us(const uint64_t *sorted, size_t count, double percent
 	return (double)sorted[rank - 1] / 1000.0;
 }
 
-static void print_latency(const char *name, uint64_t *values, size_t count)
+/* Appends to the timing line, which is written with one call so that libobs
+ * log lines from other threads cannot split it. */
+static __attribute__((format(printf, 3, 4))) void append(char *line, size_t size, const char *format, ...)
+{
+	size_t used = strlen(line);
+	if (used >= size)
+		return;
+	va_list args;
+	va_start(args, format);
+	vsnprintf(line + used, size - used, format, args);
+	va_end(args);
+}
+
+static void append_latency(char *line, size_t size, const char *name, uint64_t *values, size_t count)
 {
 	qsort(values, count, sizeof(*values), compare_u64);
-	printf(" %s_p50_us=%.1f %s_p95_us=%.1f %s_min_us=%.1f %s_max_us=%.1f", name, percentile_us(values, count, 50),
-	       name, percentile_us(values, count, 95), name, count ? (double)values[0] / 1000.0 : 0.0, name,
-	       count ? (double)values[count - 1] / 1000.0 : 0.0);
+	append(line, size, " %s_p50_us=%.1f %s_p95_us=%.1f %s_min_us=%.1f %s_max_us=%.1f", name,
+	       percentile_us(values, count, 50), name, percentile_us(values, count, 95), name,
+	       count ? (double)values[0] / 1000.0 : 0.0, name, count ? (double)values[count - 1] / 1000.0 : 0.0);
 }
 
 static uint64_t read_copy_bytes(void)
@@ -436,6 +450,8 @@ int main(int argc, char **argv)
 	vt_encode_timing_reset_fn((uint64_t)warmup);
 	const int frames_before = obs_output_get_total_frames(output);
 	const uint64_t waits_before = snapshot_download_waits();
+	const uint32_t render_total_before = obs_get_total_frames();
+	const uint32_t render_lagged_before = obs_get_lagged_frames();
 	if (!obs_output_start(output)) {
 		fprintf(stderr, "harness: output start failed: %s\n", obs_output_get_last_error(output));
 		dlclose(vt_plugin_handle);
@@ -449,6 +465,15 @@ int main(int argc, char **argv)
 		os_sleep_ms(50);
 		waited_ms += 50;
 	}
+	/* Before the stop: video-io's counters start when the encoder connects
+	 * and are only logged, not kept, when it disconnects. A texture
+	 * encoder's skipped frames are frames it was given again because no new
+	 * texture was free (or rendering lagged); a raw encoder's are frames
+	 * video-io dropped because the encoder lagged. */
+	uint32_t video_total = 0, video_skipped = 0;
+	obs_get_video_frame_counts(&video_total, &video_skipped);
+	uint32_t render_total = obs_get_total_frames() - render_total_before;
+	uint32_t render_lagged = obs_get_lagged_frames() - render_lagged_before;
 	obs_output_stop(output);
 	int frames = obs_output_get_total_frames(output) - frames_before;
 	uint64_t submissions = vt_encode_submission_total_fn();
@@ -476,17 +501,23 @@ int main(int argc, char **argv)
 		latency_count = vt_encode_timing_samples_fn(entry_latency, submit_latency, (size_t)want_frames);
 	size_t skipped = latency_count < (size_t)warmup ? latency_count : (size_t)warmup;
 	size_t measured = latency_count - skipped;
-	printf("timing path=%s warmup=%ld cpu_window=%s cpu_frames=%llu cpu_wall_ms=%.3f cpu_user_ms=%.3f "
-	       "cpu_system_ms=%.3f cpu_us_per_frame=%.2f cpu_percent=%.2f latency_samples=%zu",
+	char line[2048] = "";
+	append(line, sizeof(line),
+	       "timing path=%s warmup=%ld cpu_window=%s cpu_frames=%llu cpu_wall_ms=%.3f cpu_user_ms=%.3f "
+	       "cpu_system_ms=%.3f cpu_us_per_frame=%.2f cpu_percent=%.2f render_frames=%u render_lagged=%u "
+	       "video_frames=%u video_skipped=%u latency_samples=%zu",
 	       path, warmup, cpu_window ? "true" : "false", (unsigned long long)cpu_frames, (double)cpu_wall_ns / 1e6,
 	       (double)cpu_user_ns / 1e6, (double)cpu_system_ns / 1e6,
 	       cpu_frames ? (double)(cpu_user_ns + cpu_system_ns) / 1000.0 / (double)cpu_frames : 0.0,
-	       cpu_wall_ns ? 100.0 * (double)(cpu_user_ns + cpu_system_ns) / (double)cpu_wall_ns : 0.0, measured);
+	       cpu_wall_ns ? 100.0 * (double)(cpu_user_ns + cpu_system_ns) / (double)cpu_wall_ns : 0.0, render_total,
+	       render_lagged, video_total, video_skipped, measured);
 	if (entry_latency && submit_latency) {
-		print_latency("entry_to_output", entry_latency + skipped, measured);
-		print_latency("submit_to_output", submit_latency + skipped, measured);
+		append_latency(line, sizeof(line), "entry_to_output", entry_latency + skipped, measured);
+		append_latency(line, sizeof(line), "submit_to_output", submit_latency + skipped, measured);
 	}
-	printf("\n");
+	append(line, sizeof(line), "\n");
+	fflush(stdout);
+	fputs(line, stdout);
 	fflush(stdout);
 	free(entry_latency);
 	free(submit_latency);

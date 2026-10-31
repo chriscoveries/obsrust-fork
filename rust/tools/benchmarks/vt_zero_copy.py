@@ -47,6 +47,11 @@ METRICS = [
     "entry_to_output_p95_us",
     "submit_to_output_p50_us",
     "submit_to_output_p95_us",
+    # Frame health over the whole run: frames the render thread missed, and
+    # frames the encoder was given twice (texture) or that video-io dropped
+    # (raw). A route that repeats frames cannot be compared per frame.
+    "render_lagged",
+    "video_skipped",
 ]
 BUILD_PROCESSES = ["clang", "clang++", "swift-frontend", "rustc", "ld"]
 SOURCES = [
