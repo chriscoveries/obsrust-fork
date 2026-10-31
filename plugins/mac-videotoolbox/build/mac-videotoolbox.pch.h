@@ -12,10 +12,19 @@
 #include <obs-avc.h>
 
 #include <CoreFoundation/CoreFoundation.h>
+#include <IOSurface/IOSurface.h>
 #include <VideoToolbox/VideoToolbox.h>
 #include <VideoToolbox/VTVideoEncoderList.h>
 #include <CoreMedia/CoreMedia.h>
 
+#include <pthread.h>
+#include <stdint.h>
+
 #include <util/apple/cfstring-utils.h>
 
 #include <assert.h>
+
+#include "plugins/mac-videotoolbox/vt-frame-copy.h"
+
+/* vt-frame-copy.c */
+#include <string.h>

@@ -14,6 +14,7 @@ target_link_libraries(
     "$<LINK_LIBRARY:FRAMEWORK,CoreFoundation.framework>"
     "$<LINK_LIBRARY:FRAMEWORK,CoreMedia.framework>"
     "$<LINK_LIBRARY:FRAMEWORK,CoreVideo.framework>"
+    "$<LINK_LIBRARY:FRAMEWORK,IOSurface.framework>"
     "$<LINK_LIBRARY:FRAMEWORK,VideoToolbox.framework>"
 )
 
