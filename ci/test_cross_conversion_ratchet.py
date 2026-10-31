@@ -88,6 +88,10 @@ class CrossConversionRatchet(unittest.TestCase):
         slices = {"coreaudio-encoder-cross", "obs-text-cross"}
         self.assertLessEqual(slices, opted_in(source()))
 
+    def test_the_updater_slice_is_opted_in(self) -> None:
+        """`updater-cross` is a real slice: its diagnostics are stated (#2625)."""
+        self.assertIn("updater-cross", opted_in(source()))
+
 
     def test_the_shared_and_plugin_slices_stay_opted_in(self) -> None:
         """The win-x64 slices burned down after #3157 stay opted in, so a later
