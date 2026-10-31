@@ -31,6 +31,13 @@
  * frame to reuse that entry was shown as the previous frame of a pair, so
  * its fields were skipped.
  *
+ * A cold render path (obs-rust/obs-studio#456): the cold_start case. The
+ * first frame a source showed paid for one (shader compile, first texture
+ * upload), and the graphics thread stood still for about 0.4 s while the
+ * source's frames kept coming: they were overdue when it went on, and the
+ * buffered walk dropped them (fields 2-23 of 72 never shown). The case holds
+ * the graphics thread that long on the source's first frame, on purpose.
+ *
  * Needs core video, so it runs under xvfb-run and skips without a display.
  */
 
@@ -70,6 +77,9 @@
  * (shader compile, first texture upload; obs-rust/obs-studio#456). */
 #define WARMUP_FRAMES 6
 #define WARMUP_TICKS 4
+/* About how long the cold render path held the graphics thread in #456:
+ * fields 2-23 (0.37 s of 60i) were never shown. */
+#define COLD_STALL_MS 400
 /* Output frames to keep recording after the last measured field has been
  * shown, and the most to wait for it: the fixed sleep this replaces was 300 ms
  * (#2796). The frames after the last field also record the next one, and a
@@ -170,6 +180,47 @@ static struct obs_source_info interlaced_source = {
 	.get_name = interlaced_name,
 	.create = interlaced_create,
 	.destroy = interlaced_destroy,
+};
+
+/* The cold_start case's cold render path (#456): a pass-through async video
+ * filter on the measured source. The graphics thread runs it as the source
+ * takes a frame (async_tick()), and on the first one it holds the thread for
+ * COLD_STALL_MS, so the canvas outputs nothing meanwhile. */
+static volatile bool cold_pending;
+
+static const char *cold_name(void *unused)
+{
+	UNUSED_PARAMETER(unused);
+	return "cold render path";
+}
+
+static void *cold_create(obs_data_t *settings, obs_source_t *source)
+{
+	UNUSED_PARAMETER(settings);
+	return source;
+}
+
+static void cold_destroy(void *data)
+{
+	UNUSED_PARAMETER(data);
+}
+
+static struct obs_source_frame *cold_filter_video(void *data, struct obs_source_frame *frame)
+{
+	UNUSED_PARAMETER(data);
+	if (os_atomic_set_bool(&cold_pending, false))
+		os_sleep_ms(COLD_STALL_MS);
+	return frame;
+}
+
+static struct obs_source_info cold_filter = {
+	.id = "cold_render_path_filter",
+	.type = OBS_SOURCE_TYPE_FILTER,
+	.output_flags = OBS_SOURCE_VIDEO | OBS_SOURCE_ASYNC,
+	.get_name = cold_name,
+	.create = cold_create,
+	.destroy = cold_destroy,
+	.filter_video = cold_filter_video,
 };
 
 static void fill_rows(uint8_t *pixels, int parity, int t)
@@ -309,6 +360,7 @@ enum start {
 	START_WARM,  /* the source's own warm-up frames, then at once */
 	START_NEW,   /* nothing: a source that never showed a frame */
 	START_PAUSE, /* the source's own warm-up frames, then a pause */
+	START_NONE,  /* nothing: the source's first frame is measured (before the warm-up, #456) */
 };
 
 struct rates {
@@ -349,20 +401,27 @@ static obs_source_t *create_interlaced(enum obs_deinterlace_mode mode, bool top_
 }
 
 static void check_field_order(enum obs_deinterlace_mode mode, bool top_first, bool unbuffered, const struct rates *r,
-			      enum start start)
+			      enum start start, bool cold)
 {
 	const uint32_t field_rate = 2 * r->source_fps;
 	char what[128];
-	snprintf(what, sizeof(what), "%s, %s%s%s", mode_name(mode),
+	snprintf(what, sizeof(what), "%s, %s%s%s%s", mode_name(mode),
 		 top_first ? "top field first" : "bottom field first", unbuffered ? ", unbuffered" : "",
 		 start == START_NEW     ? ", first frame"
 		 : start == START_PAUSE ? ", after a pause"
-					: "");
+					: "",
+		 cold ? ", cold start" : "");
 
 	if (!reset_canvas(r->canvas_fps))
 		fail();
 
 	obs_source_t *source = create_interlaced(mode, top_first, unbuffered);
+	if (cold) {
+		obs_source_t *filter = obs_source_create_private("cold_render_path_filter", "cold render path", NULL);
+		os_atomic_set_bool(&cold_pending, true);
+		obs_source_filter_add(source, filter);
+		obs_source_release(filter);
+	}
 	obs_scene_t *scene = obs_scene_create("scene");
 
 	static struct watch w;
@@ -382,6 +441,8 @@ static void check_field_order(enum obs_deinterlace_mode mode, bool top_first, bo
 		obs_source_release(warm);
 		obs_scene_add(scene, source);
 		os_sleep_ms(PAUSE_MS);
+	} else if (start == START_NONE) {
+		obs_scene_add(scene, source);
 	} else {
 		obs_scene_add(scene, source);
 		warm_up(source, r->source_fps, &w);
@@ -426,12 +487,13 @@ static void check_field_order(enum obs_deinterlace_mode mode, bool top_first, bo
 	 * frames (fields 0-3) after the warm-up: its last frame and the first
 	 * measured one are stamped back to back, so the first has no frame
 	 * duration to time its fields by (and Yadif needs a previous frame).
-	 * After a pause or for a new source, count every field from field 0,
-	 * the first one shown included (#1965); only a buffered new source's
-	 * first frame may be held longer than the cadence, as the buffered
-	 * clock starts from it. Also count how many output frames each field
-	 * is held for (the last one is held until the case ends). */
-	const int startup = start == START_WARM ? STARTUP_FIELDS : 0;
+	 * The same goes for the first two frames of a source measured from its
+	 * first frame. After a pause or for a new source, count every field
+	 * from field 0, the first one shown included (#1965); only a buffered
+	 * new source's first frame may be held longer than the cadence, as the
+	 * buffered clock starts from it. Also count how many output frames each
+	 * field is held for (the last one is held until the case ends). */
+	const int startup = start == START_WARM || start == START_NONE ? STARTUP_FIELDS : 0;
 	const int unheld = start == START_NEW && !unbuffered ? 2 : startup;
 	int shown[MAX_SEEN];
 	size_t num = 0, unknown = 0, backwards = 0, skipped = 0, max_gap = 0, held = 0, max_held = 0;
@@ -698,6 +760,7 @@ struct field_case {
 	bool unbuffered;
 	struct rates rates;
 	enum start start;
+	bool cold; /* the source's first frame holds the graphics thread for COLD_STALL_MS (#456) */
 };
 
 static void run_case(void **state)
@@ -705,7 +768,7 @@ static void run_case(void **state)
 	const struct field_case *c = *state;
 	if (!obs_up)
 		skip();
-	check_field_order(c->mode, c->top_first, c->unbuffered, &c->rates, c->start);
+	check_field_order(c->mode, c->top_first, c->unbuffered, &c->rates, c->start, c->cold);
 }
 
 /* source_fps: frames per second, the field rate is twice that */
@@ -741,6 +804,12 @@ static void run_case(void **state)
 		 &(struct field_case){OBS_DEINTERLACE_MODE_LINEAR_2X, true, false, {source_fps, canvas_fps},     \
 				      START_PAUSE}}
 
+/* A cold render path on the source's first frame (#456), in the case it was
+ * seen in: Yadif 2x, top field first, buffered. */
+#define COLD_START_CASES(rate_name, source_fps, canvas_fps) \
+	{"cold_start_yadif_2x_" #rate_name, run_case, NULL, NULL, \
+	 &(struct field_case){OBS_DEINTERLACE_MODE_YADIF_2X, true, false, {source_fps, canvas_fps}, START_NONE, true}}
+
 #define FIELD_CASES(rate_name, source_fps, canvas_fps)                                                                         \
 	FIELD_CASE(yadif_2x_top_first_##rate_name, OBS_DEINTERLACE_MODE_YADIF_2X, true, source_fps, canvas_fps),               \
 		FIELD_CASE(yadif_2x_bottom_first_##rate_name, OBS_DEINTERLACE_MODE_YADIF_2X, false, source_fps, canvas_fps),   \
@@ -768,6 +837,7 @@ static int setup(void **state)
 	}
 
 	obs_register_source(&interlaced_source);
+	obs_register_source(&cold_filter);
 	return 0;
 }
 
@@ -805,6 +875,7 @@ int main(void)
 		BUFFERED_PAUSE_CASES(50i_into_60, 25, 60),
 		BUFFERED_PAUSE_CASES(50i_into_30, 25, 30),
 		BUFFERED_PAUSE_CASES(60i_into_50, 30, 50),
+		COLD_START_CASES(60i_into_60, 30, 60),
 		BURST_CASES(60i_into_60, 30, 60),
 		BURST_CASES(50i_into_50, 25, 50),
 		BURST_CASES(50i_into_60, 25, 60),
