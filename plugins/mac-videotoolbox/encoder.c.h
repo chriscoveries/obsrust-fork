@@ -1518,8 +1518,6 @@ static bool vt_encode(void *data, struct encoder_frame *frame, struct encoder_pa
 		return false;
 	if (!vt_encode_submission_reserve())
 		return true;
-	if (!vt_encode_submission_reserve())
-		return true;
 
 	OSStatus code;
 
