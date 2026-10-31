@@ -300,9 +300,10 @@ bool init_gpu_encoding(struct obs_core_video_mix *video, bool async_texture)
 	video->gpu_encode_stop = false;
 	video->gpu_encoder_sync_frame_available = false;
 
-	deque_reserve(&video->gpu_encoder_avail_queue, NUM_ENCODE_TEXTURES);
-	for (size_t i = 0; i < NUM_ENCODE_TEXTURES + (async_texture ? 1 : 0); i++) {
-		bool sync_only = async_texture && i == NUM_ENCODE_TEXTURES;
+	const size_t texture_count = async_texture ? NUM_ASYNC_ENCODE_TEXTURES : NUM_ENCODE_TEXTURES;
+	deque_reserve(&video->gpu_encoder_avail_queue, texture_count);
+	for (size_t i = 0; i < texture_count + (async_texture ? 1 : 0); i++) {
+		bool sync_only = async_texture && i == texture_count;
 		gs_texture_t *tex = NULL;
 		gs_texture_t *tex_uv = NULL;
 		uint32_t flags = GS_RENDER_TARGET | GS_SHARED_KM_TEX;

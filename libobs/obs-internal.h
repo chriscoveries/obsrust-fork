@@ -52,6 +52,10 @@
 #define NUM_CHANNELS 3
 #define MICROSECOND_DEN 1000000
 #define NUM_ENCODE_TEXTURES 10
+/* VideoToolbox retains about fourteen asynchronous IOSurface frames on Apple
+ * Silicon.  Keep two more so returning a lease is not required for every new
+ * frame.  The synchronous pool keeps its established ten-texture footprint. */
+#define NUM_ASYNC_ENCODE_TEXTURES 16
 #define NUM_ENCODE_TEXTURE_FRAMES_TO_WAIT 1
 
 static inline int64_t packet_dts_usec(struct encoder_packet *packet)

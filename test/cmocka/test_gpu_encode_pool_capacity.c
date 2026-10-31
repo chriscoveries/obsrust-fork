@@ -19,8 +19,7 @@
 static void async_texture_pool_covers_videotoolbox_in_flight_depth(void **state)
 {
 	(void)state;
-	assert_true(NUM_ENCODE_TEXTURES >=
-		    VT_HARDWARE_ENCODER_IN_FLIGHT_FRAMES + ASYNC_TEXTURE_POOL_HEADROOM);
+	assert_true(NUM_ASYNC_ENCODE_TEXTURES >= VT_HARDWARE_ENCODER_IN_FLIGHT_FRAMES + ASYNC_TEXTURE_POOL_HEADROOM);
 }
 
 int main(void)
