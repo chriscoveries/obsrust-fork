@@ -762,7 +762,9 @@ struct vt_rate_state {
 
 static bool vt_rate_state_changed(const struct vt_rate_state *old, const struct vt_rate_state *current)
 {
-    return old->bitrate != current->bitrate || old->limit_bitrate != current->limit_bitrate;
+    return old->bitrate != current->bitrate || old->limit_bitrate != current->limit_bitrate ||
+           old->max_bitrate != current->max_bitrate || old->max_bitrate_window != current->max_bitrate_window ||
+           old->quality != current->quality;
 }
 
 static bool vt_update(void *data, obs_data_t *settings)
@@ -776,7 +778,8 @@ static bool vt_update(void *data, obs_data_t *settings)
         .quality = enc->quality,
     };
 
-    update_params(enc, settings);
+    if (!update_params(enc, settings))
+        return false;
 
     const struct vt_rate_state current = {
         .bitrate = enc->bitrate,
