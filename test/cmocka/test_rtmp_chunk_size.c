@@ -46,8 +46,12 @@ static void valid_sizes(void **state)
 	assert_int_equal(rtmp->m_inChunkSize, 4096);
 	receive_chunk_size(rtmp, 1, 4);
 	assert_int_equal(rtmp->m_inChunkSize, 1);
+	receive_chunk_size(rtmp, RTMP_MAX_IN_CHUNK_SIZE, 4);
+	assert_int_equal(rtmp->m_inChunkSize, RTMP_MAX_IN_CHUNK_SIZE);
+	receive_chunk_size(rtmp, RTMP_MAX_IN_CHUNK_SIZE + 1, 4);
+	assert_int_equal(rtmp->m_inChunkSize, RTMP_MAX_IN_CHUNK_SIZE);
 	receive_chunk_size(rtmp, 0x7fffffff, 4);
-	assert_int_equal(rtmp->m_inChunkSize, 0x7fffffff);
+	assert_int_equal(rtmp->m_inChunkSize, RTMP_MAX_IN_CHUNK_SIZE);
 }
 
 static void short_message_is_ignored(void **state)

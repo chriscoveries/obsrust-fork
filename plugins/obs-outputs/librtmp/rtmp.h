@@ -199,6 +199,11 @@ extern "C"
 
 #define RTMP_DEFAULT_CHUNKSIZE	128
 
+/* RTMP 1.0 (5.4.1) lets a peer pick any chunk size up to 0x7FFFFFFF, and
+ * m_inChunkSize drives the receive path's buffering. Cap accepted values
+ * at 128 MiB so a hostile or buggy peer cannot force huge allocations. */
+#define RTMP_MAX_IN_CHUNK_SIZE (128 * 1024 * 1024)
+
     /* needs to fit largest number of bytes recv() may return */
 #define RTMP_BUFFER_CACHE_SIZE (16*1024)
 
