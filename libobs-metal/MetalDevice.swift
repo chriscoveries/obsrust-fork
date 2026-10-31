@@ -633,6 +633,7 @@ class MetalDevice {
 
         encoder.copy(from: source.texture, to: destination.texture)
         encoder.endEncoding()
+        destination.recordWriteCompletion(buffer)
     }
 
     /// Copies the contents of a texture into a texture for CPU access

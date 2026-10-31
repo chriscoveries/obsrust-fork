@@ -39,6 +39,7 @@ struct MetalTextureMapping {
 /// Convenience class for managing ``MTLTexture`` objects
 class MetalTexture {
     private let descriptor: MTLTextureDescriptor
+    private let writeCompletion = MetalTextureCompletion()
     private var mappingMode: MetalTextureMapMode
     private let resourceID: UUID
 
@@ -50,6 +51,14 @@ class MetalTexture {
     var stageBuffer: MetalStageBuffer?
     var videoPixelBuffer: CVPixelBuffer?
     var cvMetalTexture: CVMetalTexture?
+
+    func recordWriteCompletion(_ commandBuffer: MTLCommandBuffer) {
+        writeCompletion.record(commandBuffer)
+    }
+
+    func waitUntilWritesComplete() -> Bool {
+        writeCompletion.waitUntilCompleted()
+    }
 
     /// Binds the provided `IOSurfaceRef` to a new `MTLTexture` instance
     /// - Parameters:

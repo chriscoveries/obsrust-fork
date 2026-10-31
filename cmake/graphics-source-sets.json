@@ -45,6 +45,7 @@
     "libobs-metal/MetalShader.swift",
     "libobs-metal/MetalStageBuffer.swift",
     "libobs-metal/MetalTexture.swift",
+    "libobs-metal/MetalTextureCompletion.swift",
     "libobs-metal/OBSShader.swift",
     "libobs-metal/OBSSwapChain.swift",
     "libobs-metal/Sequence+Hashable.swift",

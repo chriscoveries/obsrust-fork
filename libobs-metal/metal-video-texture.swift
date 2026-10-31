@@ -28,12 +28,16 @@ private func createVideoTexturePair(
     let lumaFormat: MTLPixelFormat
     let chromaFormat: MTLPixelFormat
     if tenBit {
-        pixelFormat = fullRange ? kCVPixelFormatType_420YpCbCr10BiPlanarFullRange
+        pixelFormat =
+            fullRange
+            ? kCVPixelFormatType_420YpCbCr10BiPlanarFullRange
             : kCVPixelFormatType_420YpCbCr10BiPlanarVideoRange
         lumaFormat = .r16Unorm
         chromaFormat = .rg16Unorm
     } else {
-        pixelFormat = fullRange ? kCVPixelFormatType_420YpCbCr8BiPlanarFullRange
+        pixelFormat =
+            fullRange
+            ? kCVPixelFormatType_420YpCbCr8BiPlanarFullRange
             : kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange
         lumaFormat = .r8Unorm
         chromaFormat = .rg8Unorm
@@ -197,11 +201,9 @@ public func device_texture_wait_for_completion(
     let device: MetalDevice = unretained(device)
     let texture: MetalTexture = unretained(tex)
 
-    guard texture.device === device, let commandBuffer = device.commandQueue.makeCommandBuffer() else {
+    guard texture.device === device else {
         return false
     }
 
-    commandBuffer.commit()
-    commandBuffer.waitUntilCompleted()
-    return commandBuffer.status == .completed
+    return texture.waitUntilWritesComplete()
 }
