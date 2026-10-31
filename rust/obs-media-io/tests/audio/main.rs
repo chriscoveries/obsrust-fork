@@ -9,3 +9,5 @@ mod audio_io_layout;
 mod audio_io_parity;
 mod audio_math;
 mod audio_math_parity;
+mod audio_resampler_drift;
+mod audio_resampler_drift_parity;

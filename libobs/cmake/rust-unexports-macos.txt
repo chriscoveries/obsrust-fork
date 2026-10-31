@@ -995,3 +995,15 @@ _audio_monitor_delay_judge_diff
 _audio_monitor_delay_stale
 _audio_monitor_delay_stalled
 _audio_monitor_delay_unsynced
+
+# audio-resampler-drift.c: audio-resampler-ffmpeg.c calls them inside libobs.
+# Built on every host; not EXPORT.
+_audio_resampler_comp_count
+_audio_resampler_comp_delta
+_audio_resampler_comp_input_rate
+_audio_resampler_comp_reports_drift
+_audio_resampler_comp_set_error
+_audio_resampler_comp_step
+_audio_resampler_output_frames
+_audio_resampler_sample_format
+_audio_resampler_upmix_row

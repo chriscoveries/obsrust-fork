@@ -148,6 +148,7 @@
     "callback/signal.h",
     "media-io/audio-io.h",
     "media-io/audio-math.h",
+    "media-io/audio-resampler-drift.h",
     "media-io/audio-resampler.h",
     "media-io/format-conversion.h",
     "media-io/frame-rate.h",
