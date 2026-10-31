@@ -1155,6 +1155,10 @@ static bool vt_encode(void *data, struct encoder_frame *frame, struct encoder_pa
     return parse_sample(enc, buffer, packet, off);
 
 fail:
+    /* A successful submission transfers this reference to the output callback.
+     * A failed submission cannot rely on receiving that callback. */
+    if (pixbuf)
+        CFRelease(pixbuf);
     return false;
 }
 
