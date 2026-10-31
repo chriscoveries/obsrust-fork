@@ -19,3 +19,4 @@
 #include <util/apple/cfstring-utils.h>
 
 #include <assert.h>
+#include <stdint.h>

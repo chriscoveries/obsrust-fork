@@ -306,6 +306,9 @@ static OSStatus session_set_bitrate(VTCompressionSessionRef session, const char 
     }
 
     if (compressionPropertyKey != kVTCompressionPropertyKey_Quality) {
+        /* The slider is in kbps but VideoToolbox's integer property is bps. */
+        if (new_bitrate < 0 || new_bitrate > INT32_MAX / 1000)
+            return kVTParameterErr;
         code = session_set_prop_int(session, compressionPropertyKey, new_bitrate * 1000);
         if (code != noErr) {
             return code;
