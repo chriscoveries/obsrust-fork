@@ -14,6 +14,8 @@ struct vt_cpu_mark {
 	uint64_t wall_ns;
 	uint64_t user_ns;
 	uint64_t system_ns;
+	uint64_t service_ns;
+	bool service_read;
 };
 
 static uint64_t timing_entry_to_output_ns[VT_TIMING_CAPACITY];
@@ -22,6 +24,7 @@ static _Atomic uint64_t timing_samples = 0;
 static _Atomic uint64_t timing_window_start = 0;
 static struct vt_cpu_mark cpu_window_marks[2];
 static _Atomic bool cpu_window_marked[2];
+static _Atomic int watched_service_pid = 0;
 
 void vt_copy_bytes_reset(void)
 {
@@ -77,6 +80,18 @@ static void vt_cpu_mark_take(int index)
 	cpu_window_marks[index].wall_ns = os_gettime_ns();
 	cpu_window_marks[index].user_ns = vt_timeval_ns(usage.ru_utime);
 	cpu_window_marks[index].system_ns = vt_timeval_ns(usage.ru_stime);
+	cpu_window_marks[index].service_read = false;
+	int pid = atomic_load(&watched_service_pid);
+	struct rusage_info_v2 service;
+	if (pid > 0 && proc_pid_rusage(pid, RUSAGE_INFO_V2, (rusage_info_t *)&service) == 0) {
+		/* rusage_info times are Mach absolute time units, not nanoseconds. */
+		mach_timebase_info_data_t timebase;
+		mach_timebase_info(&timebase);
+		uint64_t ticks = service.ri_user_time + service.ri_system_time;
+		cpu_window_marks[index].service_ns = ticks / timebase.denom * timebase.numer +
+						     ticks % timebase.denom * timebase.numer / timebase.denom;
+		cpu_window_marks[index].service_read = true;
+	}
 	atomic_store(&cpu_window_marked[index], true);
 }
 
@@ -102,6 +117,20 @@ void vt_encode_submission_cancel(void)
 	pending_submission_copy_bytes = 0;
 	submission_in_progress = false;
 	atomic_fetch_sub(&used_submission_slots, 1);
+}
+
+void vt_encode_timing_watch_service(int pid)
+{
+	atomic_store(&watched_service_pid, pid);
+}
+
+bool vt_encode_service_cpu_window(uint64_t *cpu_ns)
+{
+	if (!atomic_load(&cpu_window_marked[0]) || !atomic_load(&cpu_window_marked[1]) ||
+	    !cpu_window_marks[0].service_read || !cpu_window_marks[1].service_read)
+		return false;
+	*cpu_ns = cpu_window_marks[1].service_ns - cpu_window_marks[0].service_ns;
+	return true;
 }
 
 void vt_encode_timing_reset(uint64_t window_start)

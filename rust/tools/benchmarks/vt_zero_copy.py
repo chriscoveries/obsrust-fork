@@ -41,7 +41,11 @@ ROUTES = {
     "raw_no_gpu": ["--raw-no-gpu"],
 }
 METRICS = [
+    # CPU of the OBS process, of VTEncoderXPCService (where VideoToolbox
+    # encodes, outside the process) and of both, per accepted submission.
     "cpu_us_per_frame",
+    "service_us_per_frame",
+    "total_us_per_frame",
     "cpu_percent",
     "entry_to_output_p50_us",
     "entry_to_output_p95_us",
@@ -203,7 +207,8 @@ def main() -> None:
                 log(f"{route} failed ({record['returncode']}): {record.get('stderr', '')[-400:]}")
             else:
                 metrics = record["metrics"]
-                log(f"{route}: {metrics['cpu_us_per_frame']:.1f} us CPU/frame, "
+                log(f"{route}: {metrics['cpu_us_per_frame']:.1f} us CPU/frame "
+                    f"(+{metrics['service_us_per_frame']:.1f} in VTEncoderXPCService), "
                     f"entry->output p50 {metrics['entry_to_output_p50_us']:.0f} us, "
                     f"load {record['load_before']['load_1m']:.2f} -> {record['load_after']['load_1m']:.2f}")
         if source_hash() != fingerprint:
@@ -230,7 +235,7 @@ def main() -> None:
             "format": "NV12",
             "fps": 60,
             "source": "color_source",
-            "encoder": "VideoToolbox H.264, bitrate 2500",
+            "encoder": "VideoToolbox H.264 hardware (com.apple.videotoolbox.videoencoder.ave.avc), bitrate 2500",
             "output": "null_output with CoreAudio AAC",
             "frames": args.frames,
             "warmup": args.warmup,

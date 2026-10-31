@@ -28,6 +28,8 @@
 #include <string.h>
 
 #include <dlfcn.h>
+#include <libproc.h>
+#include <sys/time.h>
 
 #include <util/base.h>
 #include <util/platform.h>
@@ -57,6 +59,8 @@ static void (*vt_test_force_raw_fn)(bool) = NULL;
 static void (*vt_encode_timing_reset_fn)(uint64_t) = NULL;
 static size_t (*vt_encode_timing_samples_fn)(uint64_t *, uint64_t *, size_t) = NULL;
 static bool (*vt_encode_cpu_window_fn)(uint64_t *, uint64_t *, uint64_t *, uint64_t *) = NULL;
+static void (*vt_encode_timing_watch_service_fn)(int) = NULL;
+static bool (*vt_encode_service_cpu_window_fn)(uint64_t *) = NULL;
 
 static bool resolve_symbol(const char *name, void *function_pointer, size_t size)
 {
@@ -133,7 +137,47 @@ static bool resolve_copy_counter(void)
 			      sizeof(vt_encode_timing_reset_fn)) &&
 	       resolve_symbol("vt_encode_timing_samples", &vt_encode_timing_samples_fn,
 			      sizeof(vt_encode_timing_samples_fn)) &&
-	       resolve_symbol("vt_encode_cpu_window", &vt_encode_cpu_window_fn, sizeof(vt_encode_cpu_window_fn));
+	       resolve_symbol("vt_encode_cpu_window", &vt_encode_cpu_window_fn, sizeof(vt_encode_cpu_window_fn)) &&
+	       resolve_symbol("vt_encode_timing_watch_service", &vt_encode_timing_watch_service_fn,
+			      sizeof(vt_encode_timing_watch_service_fn)) &&
+	       resolve_symbol("vt_encode_service_cpu_window", &vt_encode_service_cpu_window_fn,
+			      sizeof(vt_encode_service_cpu_window_fn));
+}
+
+/* The VTEncoderXPCService instance VideoToolbox started for this process: the
+ * newest one that started after `since_us`. Returns 0 when there is none and
+ * counts every candidate, so a report shows when another process started one
+ * at the same time. */
+static pid_t find_vt_service(uint64_t since_us, int *candidates)
+{
+	*candidates = 0;
+	int bytes = proc_listallpids(NULL, 0);
+	if (bytes <= 0)
+		return 0;
+	size_t capacity = (size_t)bytes + 64;
+	pid_t *pids = calloc(capacity, sizeof(pid_t));
+	if (!pids)
+		return 0;
+	int count = proc_listallpids(pids, (int)(capacity * sizeof(pid_t)));
+	pid_t found = 0;
+	uint64_t found_start = 0;
+	for (int i = 0; i < count; i++) {
+		struct proc_bsdinfo info;
+		if (proc_pidinfo(pids[i], PROC_PIDTBSDINFO, 0, &info, sizeof(info)) != (int)sizeof(info))
+			continue;
+		if (strncmp(info.pbi_name, "VTEncoderXPCService", sizeof(info.pbi_name)) != 0)
+			continue;
+		uint64_t start = info.pbi_start_tvsec * 1000000ULL + info.pbi_start_tvusec;
+		if (start < since_us)
+			continue;
+		(*candidates)++;
+		if (start >= found_start) {
+			found = pids[i];
+			found_start = start;
+		}
+	}
+	free(pids);
+	return found;
 }
 
 static int compare_u64(const void *a, const void *b)
@@ -223,26 +267,22 @@ static uint64_t snapshot_download_waits(void)
 	return state.waits;
 }
 
-static const char *find_vt_encoder_id(void)
+/* The H.264 encoder OBS users get on Apple Silicon is VideoToolbox's hardware
+ * one, com.apple.videotoolbox.videoencoder.ave.avc ("Apple VT H264 Hardware
+ * Encoder"). com.apple.videotoolbox.videoencoder.h264 is the software encoder,
+ * which the first version of this harness picked by matching "264".
+ * --encoder=ID picks any registered encoder instead. */
+#define VT_HARDWARE_H264 "com.apple.videotoolbox.videoencoder.ave.avc"
+
+static const char *find_vt_encoder_id(const char *wanted)
 {
-	static char id[128];
-	static char fallback[128];
 	size_t idx = 0;
 	const char *candidate = NULL;
-
-	fallback[0] = 0;
 	while (obs_enum_encoder_types(idx++, &candidate)) {
-		if (!candidate || !strstr(candidate, "videotoolbox"))
-			continue;
-		if (strstr(candidate, "264")) {
-			snprintf(id, sizeof(id), "%s", candidate);
-			return id;
-		}
-		if (!fallback[0])
-			snprintf(fallback, sizeof(fallback), "%s", candidate);
+		if (candidate && strcmp(candidate, wanted ? wanted : VT_HARDWARE_H264) == 0)
+			return candidate;
 	}
-
-	return fallback[0] ? fallback : NULL;
+	return NULL;
 }
 
 static bool load_build_tree_modules(const char *argv0)
@@ -305,8 +345,14 @@ int main(int argc, char **argv)
 	bool raw_no_gpu = false;
 	int want_frames = DEFAULT_FRAMES;
 	long warmup = -1;
+	const char *wanted_encoder = NULL;
+	struct timeval harness_start;
+	gettimeofday(&harness_start, NULL);
+	uint64_t harness_start_us = (uint64_t)harness_start.tv_sec * 1000000ULL + (uint64_t)harness_start.tv_usec;
 	for (int i = 1; i < argc; i++) {
-		if (strncmp(argv[i], "--warmup=", 9) == 0) {
+		if (strncmp(argv[i], "--encoder=", 10) == 0) {
+			wanted_encoder = argv[i] + 10;
+		} else if (strncmp(argv[i], "--warmup=", 9) == 0) {
 			char *end = NULL;
 			warmup = strtol(argv[i] + 9, &end, 10);
 			if (!argv[i][9] || !end || *end || warmup <= 0) {
@@ -324,7 +370,7 @@ int main(int argc, char **argv)
 			long parsed = strtol(argv[i], &end, 10);
 			if (!argv[i][0] || !end || *end || parsed <= 0 || parsed > INT32_MAX) {
 				fprintf(stderr,
-					"usage: %s [frames=%d] [--warmup=N] [--raw-fallback|--raw-planar|--raw-no-gpu]\n",
+					"usage: %s [frames=%d] [--warmup=N] [--encoder=ID] [--raw-fallback|--raw-planar|--raw-no-gpu]\n",
 					argv[0], DEFAULT_FRAMES);
 				return 1;
 			}
@@ -410,9 +456,10 @@ int main(int argc, char **argv)
 	obs_scene_add(scene, color);
 	obs_set_output_source(0, obs_scene_get_source(scene));
 
-	const char *enc_id = find_vt_encoder_id();
+	const char *enc_id = find_vt_encoder_id(wanted_encoder);
 	if (!enc_id) {
-		fprintf(stderr, "harness: no VideoToolbox encoder found\n");
+		fprintf(stderr, "harness: VideoToolbox encoder %s is not registered\n",
+			wanted_encoder ? wanted_encoder : VT_HARDWARE_H264);
 		obs_shutdown();
 		return 1;
 	}
@@ -460,8 +507,17 @@ int main(int argc, char **argv)
 	}
 
 	int waited_ms = 0;
+	pid_t service_pid = 0;
+	int service_candidates = 0;
 	while (vt_encode_submission_total_fn() < (uint64_t)want_frames && waited_ms < TIMEOUT_MS &&
 	       obs_output_active(output)) {
+		/* The session (and its service) exists once a frame was accepted;
+		 * the window opens `warmup` frames later. */
+		if (!service_pid && vt_encode_submission_total_fn() > 0) {
+			service_pid = find_vt_service(harness_start_us, &service_candidates);
+			if (service_pid)
+				vt_encode_timing_watch_service_fn((int)service_pid);
+		}
 		os_sleep_ms(50);
 		waited_ms += 50;
 	}
@@ -492,8 +548,9 @@ int main(int argc, char **argv)
 	       (unsigned long long)copied_bytes, (unsigned long long)bytes_per_submission,
 	       (unsigned long long)bytes_remainder, (unsigned long long)waits);
 
-	uint64_t cpu_frames = 0, cpu_wall_ns = 0, cpu_user_ns = 0, cpu_system_ns = 0;
+	uint64_t cpu_frames = 0, cpu_wall_ns = 0, cpu_user_ns = 0, cpu_system_ns = 0, service_ns = 0;
 	bool cpu_window = vt_encode_cpu_window_fn(&cpu_frames, &cpu_wall_ns, &cpu_user_ns, &cpu_system_ns);
+	bool service_window = vt_encode_service_cpu_window_fn(&service_ns);
 	uint64_t *entry_latency = calloc((size_t)want_frames, sizeof(uint64_t));
 	uint64_t *submit_latency = calloc((size_t)want_frames, sizeof(uint64_t));
 	size_t latency_count = 0;
@@ -505,12 +562,17 @@ int main(int argc, char **argv)
 	append(line, sizeof(line),
 	       "timing path=%s warmup=%ld cpu_window=%s cpu_frames=%llu cpu_wall_ms=%.3f cpu_user_ms=%.3f "
 	       "cpu_system_ms=%.3f cpu_us_per_frame=%.2f cpu_percent=%.2f render_frames=%u render_lagged=%u "
-	       "video_frames=%u video_skipped=%u latency_samples=%zu",
+	       "video_frames=%u video_skipped=%u encoder=%s service_pid=%d service_candidates=%d service_window=%s "
+	       "service_cpu_ms=%.3f service_us_per_frame=%.2f total_us_per_frame=%.2f latency_samples=%zu",
 	       path, warmup, cpu_window ? "true" : "false", (unsigned long long)cpu_frames, (double)cpu_wall_ns / 1e6,
 	       (double)cpu_user_ns / 1e6, (double)cpu_system_ns / 1e6,
 	       cpu_frames ? (double)(cpu_user_ns + cpu_system_ns) / 1000.0 / (double)cpu_frames : 0.0,
 	       cpu_wall_ns ? 100.0 * (double)(cpu_user_ns + cpu_system_ns) / (double)cpu_wall_ns : 0.0, render_total,
-	       render_lagged, video_total, video_skipped, measured);
+	       render_lagged, video_total, video_skipped, enc_id, (int)service_pid, service_candidates,
+	       service_window ? "true" : "false", (double)service_ns / 1e6,
+	       cpu_frames ? (double)service_ns / 1000.0 / (double)cpu_frames : 0.0,
+	       cpu_frames ? (double)(cpu_user_ns + cpu_system_ns + service_ns) / 1000.0 / (double)cpu_frames : 0.0,
+	       measured);
 	if (entry_latency && submit_latency) {
 		append_latency(line, sizeof(line), "entry_to_output", entry_latency + skipped, measured);
 		append_latency(line, sizeof(line), "submit_to_output", submit_latency + skipped, measured);
@@ -535,6 +597,11 @@ int main(int argc, char **argv)
 
 	if (!cpu_window || cpu_frames != (uint64_t)(want_frames - warmup)) {
 		fprintf(stderr, "harness: CPU window did not cover submissions %ld to %d\n", warmup, want_frames);
+		return 1;
+	}
+	if (!service_window || service_candidates != 1) {
+		fprintf(stderr, "harness: VTEncoderXPCService CPU not read (pid %d, %d candidates)\n", (int)service_pid,
+			service_candidates);
 		return 1;
 	}
 	if (submissions != (uint64_t)want_frames) {

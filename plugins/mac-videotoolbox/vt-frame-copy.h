@@ -54,6 +54,12 @@ EXPORT void vt_encode_timing_record(uint64_t entered_ns, uint64_t submitted_ns);
 EXPORT size_t vt_encode_timing_samples(uint64_t *entry_to_output_ns, uint64_t *submit_to_output_ns, size_t capacity);
 EXPORT bool vt_encode_cpu_window(uint64_t *frames, uint64_t *wall_ns, uint64_t *user_ns, uint64_t *system_ns);
 
+/* VideoToolbox encodes in VTEncoderXPCService, another process, whose CPU
+ * time getrusage() does not see. With a pid set, each window mark also reads
+ * that process's user + system time (proc_pid_rusage). */
+EXPORT void vt_encode_timing_watch_service(int pid);
+EXPORT bool vt_encode_service_cpu_window(uint64_t *cpu_ns);
+
 #ifdef __cplusplus
 }
 #endif
